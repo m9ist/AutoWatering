@@ -1,5 +1,6 @@
 #include <TimeLib.h> // Timelib in library manager
 
+#define IS_DEBUG true
 
 struct Plant {
   String plantName;
@@ -21,12 +22,25 @@ struct State {
   Plant plants[8];
 };
 
+
 void setup() {
-  initLogging(2); // sd pin
-  // put your setup code here, to run once:
+  initLogging(26); // sd pin
+  writeln("Hellow world!");
+  
+  if (IS_DEBUG) {
+    initScreen();
+  }
 }
 
 void loop() {
+  // отладочный блок
+  if (IS_DEBUG) {
+    loopScreen();
+    return;
+  }
+
+
+
   // главная мысль, если нужно выполнить команду, сразу ее сделать, а потом запустить алгоритм заново
   // сначала нужно вытащить команду от Алисы и выполнить ее
   // потом проверить стейт
