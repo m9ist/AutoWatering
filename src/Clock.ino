@@ -45,7 +45,7 @@ void initClock() {
       // rtc.halt();
       Ds1302::DateTime dt = {
           .year = 25,
-          .month = Ds1302::MONTH_SEP,
+          .month = Ds1302::MONTH_SET, // в библиотеке опечатка, новая версия не подхватывается
           .day = 8,
           .hour = 15,
           .minute = 13,

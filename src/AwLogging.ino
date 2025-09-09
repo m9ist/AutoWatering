@@ -1,6 +1,6 @@
 #include <SD.h>
 
-#define SD_TURNED_OFF false
+#define SD_TURNED_OFF true
 
 bool _inited = false;
 int _sdPin;
