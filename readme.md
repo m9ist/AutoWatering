@@ -8,7 +8,8 @@
 
 ## Начало работы
 - Для работы используется связка [VsCode](https://code.visualstudio.com/) + [PlatformIO](https://platformio.org/platformio-ide). Деплой и компиляция осуществляется средствами IDE.
-- Cоздать Config.ino !TODO!
+- В библиотеке SdFat подправить константу SPI_DRIVER_SELECT -> 2 (не смог победить на одной SPI шине SD карту и экран) libs/../SdFat/src/SdFatConfig.h 
+- Cоздать SecretHolder.cpp и реализовать там методы !TODO!
 
 ### Зачем вы разработали этот проект?
 Чтобы был.
@@ -17,6 +18,10 @@
 - tg m9ist
 
 ## Компоненты
+
+Ардуино
+Mega2560+WiFi-R3-AT328-ESP8266-32MB-CH340G
+
 дисплей
 IPS TFT RGB дисплей 1.3" дюйма, 240х240 px, на базе ST7789 цветной
 модель ZJY-IPS130-V2.0
@@ -63,16 +68,22 @@ https://espsmart.ru/blog/15-podkljuchenie-datchika-vlazhnosti-fc-28-k-esp8266.ht
 Кандидат в датчик влажности почвы TZT. Аналог.
 модель YL-69 (?) - то же самое
 https://3d-diy.ru/blog/datchik-vlazhnosti-pochvy-arduino/?srsltid=AfmBOopTGEUquAPRKpB6Ttx5A9FN63evuNqrRIelx4QxLuqCEawt0BYT
+электрическая схема https://components101.com/modules/soil-moisture-sensor-module (просто 10к резистор на питании)
 
 Кандидат в датчик влажности почвы SZYTF Soil Moisture Sensor. Аналог.
 модель HD-38
 Датчик временной рефлектометрии TDR
 https://github.com/vrxfile/test_arduino_sensors_modules/blob/master/capacitive_moisture_test/capacitive_moisture_test.ino
+https://myduino.com/product/jhs-273/
 
 Кандидат в датчик влажности почвы TENSTAR ROBOT Capacitive. Аналог. v1.2
 Емкостной датчик влажности почвы.
 Если не давать постоянно напряжение, то нужно 50ms дать на "разогрев" https://wiki.iarduino.ru/page/capacitive-soil-moisture-sensor/
 Датчик возвращает инверсное значение: чем больше влажность, тем ниже показания. Максимальные показания  - датчик находится в воздухе, минимальные - датчик находится в воде по линию пиктограммы деревьев (65мм). 
+
+Датчик уровня воды
+модель XKC-Y25-NPN 5-12v
+https://wiki.amperka.ru/products:sensor-liquid-level-contactless
 
 Тумблеры
 Пищалка
@@ -84,16 +95,18 @@ https://github.com/vrxfile/test_arduino_sensors_modules/blob/master/capacitive_m
 |  N | элемент                  | тип | Кол-во    |
 |----|--------------------------|-----|-----------|
 |  1 | Экран                    | d   | 5         |
-|  2 | Модуль реального времени | d   | 3(+2 SPI) |
-|  3 | Пищалка                  |     |           |
-|  4 | Датчик влаж и темп возд  |     |           |
-|  5 | SD карта                 | d   | 1         |
+|  2 | Модуль реального времени | d   | 3         |
+|  3 | Пищалка                  | d   | 1         |
+|  4 | Датчик влаж и темп возд  |     |           |++
+|  5 | SD карта                 | d   | 4         |
 |  6 | Датчик расхода воды      |     |           |
-|  7 | Датчик уровня воды       |     |           |
-|  8 | Управление помпой        |     |           |
-|  9 | Кнопка режима экрана     | d   | 3         |
-| 10 | Экран                    |     |           |
-| 11 | Экран                    |     |           |
+|  7 | Датчик уровня воды       | d   | 1         |
+|  8 | Управление помпой        | d   | 2 (1?)    |
+|  9 | Тумблер отключения двиг  | d   | 1         |
+| 10 | Кнопка режима экрана     | d   | 3         |
+| 11 | Датчик освещенности      |     |           |
+| 12 | Кнопка проверки          | d   | 1         |
+Итого: 23-26 d
 
 Одно растение
 |  N | элемент                          | тип | Кол-во |
@@ -102,4 +115,15 @@ https://github.com/vrxfile/test_arduino_sensors_modules/blob/master/capacitive_m
 |  2 | Датчик влажности почвы питание   | d   | 1      |
 |  3 | Датчик влажности почвы показания | a   | 1      |
 |  4 | Управление клапаном              | d   | 1      |
-Итого: 3d + 1a
+|  5 | Тумблер растения                 | d   | 1      |
+Итого: 4d + 1a
+
+# Интеграция с Алисой:
+Инструкция от яндекса https://yandex.cloud/ru/docs/iot-core/quickstart
+Сертификат
+openssl req -x509 -newkey rsa:4096 -keyout private-key.pem -out cert.pem -nodes -days 365 -subj "/CN=localhost"
+Важно, сгенерировать сертификат как для реестра, так и для устройства.
+
+Инструкция как получать токены для приложения https://yandex.cloud/ru/docs/iam/operations/iam-token/create#via-cli
+- получить OAuth токен
+- сделать пост запрос (советуют раз в час) `curl --request POST --data "{\"yandexPassportOauthToken\":\"OAthToken\"}" https://iam.api.cloud.yandex.net/iam/v1/tokens`
