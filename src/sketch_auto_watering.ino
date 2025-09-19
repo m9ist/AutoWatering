@@ -31,6 +31,7 @@ void setup() {
 
   if (IS_DEBUG) {
     initSensors();
+    initPomp();
     // initScreen();
   }
 }
@@ -39,6 +40,7 @@ void loop() {
   // отладочный блок
   if (IS_DEBUG) {
     loopSensors();
+    pumpLoop();
     return;
   }
 
@@ -46,7 +48,6 @@ void loop() {
   // запустить алгоритм заново сначала нужно вытащить команду от Алисы и
   // выполнить ее потом проверить стейт потом поливать потом послать данные
   // Алисе потом уже синхронизация времени
-  int some = getSecret();
 
   writeln("--->>> start main cycle");
 

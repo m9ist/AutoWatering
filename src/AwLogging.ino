@@ -21,7 +21,7 @@ SoftSpiDriver<SOFT_MISO_PIN, SOFT_MOSI_PIN, SOFT_SCK_PIN> softSpi;
 SdFs sd;
 FsFile file;
 
-#define SD_TURNED_OFF false
+#define SD_TURNED_OFF true
 
 bool _inited = false;
 int _sdPin;

@@ -60,30 +60,21 @@ HESAI Water Flow Sensor
 модель YF-S401
 [дока](https://wiki.iarduino.ru/page/sensor-water-flow/)
 
-
-Кандидат в датчик влажности почвы. Аналог.
-модель FC-28
-https://espsmart.ru/blog/15-podkljuchenie-datchika-vlazhnosti-fc-28-k-esp8266.html
-
-Кандидат в датчик влажности почвы TZT. Аналог.
-модель YL-69 (?) - то же самое
-https://3d-diy.ru/blog/datchik-vlazhnosti-pochvy-arduino/?srsltid=AfmBOopTGEUquAPRKpB6Ttx5A9FN63evuNqrRIelx4QxLuqCEawt0BYT
-электрическая схема https://components101.com/modules/soil-moisture-sensor-module (просто 10к резистор на питании)
-
 Кандидат в датчик влажности почвы SZYTF Soil Moisture Sensor. Аналог.
 модель HD-38
-Датчик временной рефлектометрии TDR
 https://github.com/vrxfile/test_arduino_sensors_modules/blob/master/capacitive_moisture_test/capacitive_moisture_test.ino
 https://myduino.com/product/jhs-273/
-
-Кандидат в датчик влажности почвы TENSTAR ROBOT Capacitive. Аналог. v1.2
-Емкостной датчик влажности почвы.
-Если не давать постоянно напряжение, то нужно 50ms дать на "разогрев" https://wiki.iarduino.ru/page/capacitive-soil-moisture-sensor/
-Датчик возвращает инверсное значение: чем больше влажность, тем ниже показания. Максимальные показания  - датчик находится в воздухе, минимальные - датчик находится в воде по линию пиктограммы деревьев (65мм). 
 
 Датчик уровня воды
 модель XKC-Y25-NPN 5-12v
 https://wiki.amperka.ru/products:sensor-liquid-level-contactless
+
+Аналоговый мультиплексор
+CD74HC4067
+https://arduinolab.pw/index.php/2017/07/17/16-kanalnyj-analogovyj-multipleksor-cd74hc4067/
+
+что-то
+74HC595 
 
 Тумблеры
 Пищалка
