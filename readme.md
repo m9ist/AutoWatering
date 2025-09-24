@@ -68,13 +68,16 @@ https://myduino.com/product/jhs-273/
 Датчик уровня воды
 модель XKC-Y25-NPN 5-12v
 https://wiki.amperka.ru/products:sensor-liquid-level-contactless
+350 мокро 890 сухая земля (2н)
 
 Аналоговый мультиплексор
 CD74HC4067
 https://arduinolab.pw/index.php/2017/07/17/16-kanalnyj-analogovyj-multipleksor-cd74hc4067/
 
-что-то
+Сдвиговый резистор (подача питания)
 74HC595 
+https://alexgyver.ru/lessons/74hc595/
+https://uscr.ru/kak-podklyuchit-sdvigoviy-registr-k-arduino/
 
 Тумблеры
 Пищалка
@@ -88,11 +91,11 @@ https://arduinolab.pw/index.php/2017/07/17/16-kanalnyj-analogovyj-multipleksor-c
 |  1 | Экран                    | d   | 5         |
 |  2 | Модуль реального времени | d   | 3         |
 |  3 | Пищалка                  | d   | 1         |
-|  4 | Датчик влаж и темп возд  |     |           |++
+|  4 | Датчик влаж и темп возд  |     |           |
 |  5 | SD карта                 | d   | 4         |
-|  6 | Датчик расхода воды      |     |           |
+|  6 | Датчик расхода воды      | d   | 1         |
 |  7 | Датчик уровня воды       | d   | 1         |
-|  8 | Управление помпой        | d   | 2 (1?)    |
+|  8 | Управление помпой        | d   | 1         |
 |  9 | Тумблер отключения двиг  | d   | 1         |
 | 10 | Кнопка режима экрана     | d   | 3         |
 | 11 | Датчик освещенности      |     |           |
@@ -103,11 +106,13 @@ https://arduinolab.pw/index.php/2017/07/17/16-kanalnyj-analogovyj-multipleksor-c
 |  N | элемент                          | тип | Кол-во |
 |----|----------------------------------|-----|--------|
 |  1 | Кнопка принудительного полива    | d   | 1      |
-|  2 | Датчик влажности почвы питание   | d   | 1      |
-|  3 | Датчик влажности почвы показания | a   | 1      |
+|  2 | Датчик влажности почвы показания | a   | 1      |
+|  3 | Тумблер растения                 | d   | 1      |
 |  4 | Управление клапаном              | d   | 1      |
-|  5 | Тумблер растения                 | d   | 1      |
-Итого: 4d + 1a
+Итого: 3d + 1a - напрямую
+Первые три позиции за аналоговым мультиплексором, те на 16 выходов 4d выхода + 1(a или d) под показания
+Управление клапаном за сдвиговым регистром (3 выхода на любое кол-во)
+Итого: 5d + 4d+1a + 5d + 3d = 17d + 1a
 
 # Интеграция с Алисой:
 Инструкция от яндекса https://yandex.cloud/ru/docs/iot-core/quickstart
@@ -117,4 +122,4 @@ openssl req -x509 -newkey rsa:4096 -keyout private-key.pem -out cert.pem -nodes 
 
 Инструкция как получать токены для приложения https://yandex.cloud/ru/docs/iam/operations/iam-token/create#via-cli
 - получить OAuth токен
-- сделать пост запрос (советуют раз в час) `curl --request POST --data "{\"yandexPassportOauthToken\":\"OAthToken\"}" https://iam.api.cloud.yandex.net/iam/v1/tokens`
+- сделать пост запрос (советуют раз в час) `curl --request POST --data "{\"yandexPassportOauthToken\":\"!put here! OAthToken\"}" https://iam.api.cloud.yandex.net/iam/v1/tokens`

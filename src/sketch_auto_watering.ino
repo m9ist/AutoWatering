@@ -31,7 +31,7 @@ void setup() {
 
   if (IS_DEBUG) {
     initSensors();
-    initPomp();
+    // initPomp();
     // initScreen();
   }
 }
@@ -40,7 +40,7 @@ void loop() {
   // отладочный блок
   if (IS_DEBUG) {
     loopSensors();
-    pumpLoop();
+    // pumpLoop();
     return;
   }
 
