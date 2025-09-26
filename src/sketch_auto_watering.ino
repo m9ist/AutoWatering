@@ -26,21 +26,25 @@ struct State {
 };
 
 void setup() {
-  initLogging(48);  // sd pin
+  Serial.begin(9600);
   writeln("Hellow world!");
+  // initLogging();
+  // initClock();
+  // initScreen();
 
   if (IS_DEBUG) {
-    initSensors();
+    // initSensors();
     // initPomp();
-    // initScreen();
   }
 }
 
 void loop() {
   // отладочный блок
   if (IS_DEBUG) {
-    loopSensors();
-    // pumpLoop();
+    // loopSensors();
+    // loopPomp();
+    // loopClock();
+    // loopScreen();
     return;
   }
 

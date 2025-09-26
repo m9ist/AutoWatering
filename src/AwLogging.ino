@@ -1,42 +1,32 @@
-
 #include "SdFat.h"
 
-// Chip select may be constant or RAM variable.
-const uint8_t SD_CS_PIN = 30;
-//
-// Pin numbers in templates must be constants.
-const uint8_t SOFT_MISO_PIN = 26;
-const uint8_t SOFT_MOSI_PIN = 28;
-const uint8_t SOFT_SCK_PIN = 24;
+#define SD_TURNED_OFF false
 
-// SdFat software SPI template
-SoftSpiDriver<SOFT_MISO_PIN, SOFT_MOSI_PIN, SOFT_SCK_PIN> softSpi;
-// Speed argument is ignored for software SPI.
-// #if ENABLE_DEDICATED_SPI
-#define SD_CONFIG SdSpiConfig(SD_CS_PIN, DEDICATED_SPI, SD_SCK_MHZ(0), &softSpi)
-// #else // ENABLE_DEDICATED_SPI
-// #define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SD_SCK_MHZ(0), &softSpi)
-// #endif // ENABLE_DEDICATED_SPI
+#define PIN_BUZZER 47
+
+#define SD_CS_PIN A15
+#define SD_MISO_PIN A12
+#define SD_MOSI_PIN A13
+#define SD_SCK_PIN A14
 
 SdFs sd;
 FsFile file;
 
-#define SD_TURNED_OFF true
-
 bool _inited = false;
-int _sdPin;
 // Sd2Card card;
 
-void initLogging(int sdPin) {
-  Serial.begin(9600);
-  _sdPin = sdPin;
+void initLogging() {
+  buzzerBoot();
   Serial.println("Ininited logging...");
   if (SD_TURNED_OFF) {
     return;
   }
   if (true) {
     // пробуем sdFat software spi
-    if (!sd.begin(SD_CONFIG)) {
+    SoftSpiDriver<SD_MISO_PIN, SD_MOSI_PIN, SD_SCK_PIN> softSpi;
+    SdSpiConfig sd_config =
+        SdSpiConfig(SD_CS_PIN, DEDICATED_SPI, SD_SCK_MHZ(0), &softSpi);
+    if (!sd.begin(sd_config)) {
       sd.initErrorHalt();
     }
 
@@ -155,4 +145,19 @@ void writeln(String dataString) {
           Serial.println("Couldn't open log file");
   }
           */
+}
+
+// int startup_melody[] = {784, 659, 523, 392};
+// int startup_note_durations[] = {300, 300, 400, 500};  // Последняя нота
+// длиннее
+int startup_melody[] = {262, 330, 392, 523};
+int startup_note_durations[] = {400, 400, 400, 300};
+
+void buzzerBoot() {
+  Serial.println("Startup melody");
+  for (int i = 0; i < 4; i++) {
+    tone(PIN_BUZZER, startup_melody[i], startup_note_durations[i]);
+    delay(startup_note_durations[i]);
+    delay(30);
+  }
 }

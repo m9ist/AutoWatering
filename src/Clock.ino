@@ -1,21 +1,10 @@
-/** GetDateTime.cpp
- *
- * Example of getting the date and time from the RTC.
- *
- * @version 1.0.1
- * @author Rafa Couto <caligari@treboada.net>
- * @license GNU Affero General Public License v3.0
- * @see https://github.com/Treboada/Ds1302
- *
- */
 #include <Arduino.h>
 #include <Ds1302.h>
 
-#define PIN_ENA 6
-#define PIN_CLK 8
-#define PIN_DAT 7
+#define PIN_ENA 41
+#define PIN_CLK 45
+#define PIN_DAT 43
 
-// DS1302 RTC instance
 Ds1302 rtc(PIN_ENA, PIN_CLK, PIN_DAT);
 
 const static char* WeekDays[] = {"Monday", "Tuesday",  "Wednesday", "Thursday",
@@ -27,7 +16,7 @@ void initClock() {
   rtc.init();
   writeln("Clock inited");
 
-  // test if clock is halted and set a date-time (see example 2) to start it
+  // установить первоначальное время
   if (false) {
     writeln("RTC is halted. Setting time...");
     // rtc.halt();
@@ -35,14 +24,13 @@ void initClock() {
         .year = 25,
         .month = Ds1302::MONTH_SET,  // в библиотеке опечатка, новая версия не
                                      // подхватывается
-        .day = 8,
-        .hour = 15,
-        .minute = 13,
+        .day = 25,
+        .hour = 10,
+        .minute = 45,
         .second = 00,
-        .dow = Ds1302::DOW_MON};
+        .dow = Ds1302::DOW_THU};
 
     rtc.setDateTime(&dt);
-    // rtc.start();
   }
 }
 

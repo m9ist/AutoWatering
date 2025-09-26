@@ -17,8 +17,8 @@ LCD without CS) #06 DC  -> D10/PA1 or any digital #07 BLK -> NC
 #define CS_ALWAYS_LOW
 #define COMPATIBILITY_MODE
 
-#define TFT_DC 49
-#define TFT_RES 53
+#define TFT_DC 39
+#define TFT_RES 37
 #define TFT_CS -1
 
 // размеры экрана
