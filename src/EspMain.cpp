@@ -1,10 +1,12 @@
 #include <ArduinoJson.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
+#include <SettingsGyver.h>
 #include <WiFiClientSecure.h>
 #include <time.h>
 
-// Блок из SecretHolder, чтобы не заводить лишний .h файл, нужно там реализовать эти методы
+// Блок из SecretHolder, чтобы не заводить лишний .h файл, нужно там реализовать
+// эти методы
 String ssid();
 String wifiPasswork();
 String publicCert();
@@ -17,6 +19,24 @@ const int yandex_iot_port = 443;
 
 WiFiClientSecure espClient;
 String secretKey;
+
+SettingsGyver sett("My Settings");
+int slider;
+String input;
+bool updatedSettings = false;
+
+void build(sets::Builder& b) {
+  b.Slider("My slider", 0, 50, 1, "ml", &slider);
+  b.Input("My input", &input);
+  if (b.beginButtons()) {
+    if (b.Button("Confirm")) {
+      updatedSettings = true;
+    }
+    b.endButtons();
+  }
+}
+
+void updateSettings(sets::Updater& u) {}
 
 String getBearerAuthKey() {
   // если пустой или прошел час, то обновляем
@@ -55,35 +75,6 @@ void processCommand(String command, JsonDocument& doc) {
   String responseJson;
   serializeJson(response, responseJson);
   // mqttClient.publish(topic_events, responseJson.c_str());
-}
-
-void mqttCallback(char* topic, byte* payload, unsigned int length) {
-  Serial.print("Message received on topic: ");
-  Serial.println(topic);
-
-  // Преобразование payload в строку
-  char message[length + 1];
-  memcpy(message, payload, length);
-  message[length] = '\0';
-
-  Serial.print("Message: ");
-  Serial.println(message);
-
-  // Парсинг JSON
-  JsonDocument doc;
-  DeserializationError error = deserializeJson(doc, message);
-
-  if (error) {
-    Serial.print("JSON parsing failed: ");
-    Serial.println(error.c_str());
-    return;
-  }
-
-  // Обработка команд
-  if (doc.containsKey("command")) {
-    String command = doc["command"].as<String>();
-    processCommand(command, doc);  // todo
-  }
 }
 
 void setupWifiClient() {
@@ -131,14 +122,16 @@ void setup(void) {
              "ntp.ix.ru");
   Serial.println(getTimestamp());
 
-  setupWifiClient();
-  // setupMQTT();
+  // setupWifiClient();
+
+  sett.begin();
+  sett.onBuild(build);
+  sett.onUpdate(updateSettings);
 }
 
 void loop(void) {
   if (true) {
-    Serial.println("work done.");
-    delay(5000);
+    sett.tick();
     return;
   }
   Serial.println("Start sending message...");

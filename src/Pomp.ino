@@ -2,17 +2,70 @@
 #define PIN_REGISTER_DAT 34  // ds
 #define PIN_REGISTER_CLK 38  // shcp
 
+// общий на оба мультиплексера, тк читать будет по очереди
+#define PIN_PLANT_MULTIPLEXER_S0 A11
+#define PIN_PLANT_MULTIPLEXER_S1 A10
+#define PIN_PLANT_MULTIPLEXER_S2 A9
+#define PIN_PLANT_MULTIPLEXER_S3 A8
+
+#define PIN_MULTIPLEXER_WATER_NOW_SIG 20
+#define PIN_MULTIPLEXER_PLANT_TURN_ON_SIG 18
+
 #define PIN_POMP -1
 
 bool pompState = false;
 uint32_t currentState = 0;
+int plantsToButton[] = {1, 3, 5, 7, 8, 10, 12, 14, 0, 2, 4, 6, 9, 11, 13, 15};
 
 void initPomp() {
   // pinMode(PIN_POMP, OUTPUT);
   pinMode(PIN_REGISTER_CS, OUTPUT);
   pinMode(PIN_REGISTER_DAT, OUTPUT);
   pinMode(PIN_REGISTER_CLK, OUTPUT);
+
+  pinMode(PIN_PLANT_MULTIPLEXER_S0, OUTPUT);
+  pinMode(PIN_PLANT_MULTIPLEXER_S1, OUTPUT);
+  pinMode(PIN_PLANT_MULTIPLEXER_S2, OUTPUT);
+  pinMode(PIN_PLANT_MULTIPLEXER_S3, OUTPUT);
+
+  pinMode(PIN_MULTIPLEXER_PLANT_TURN_ON_SIG, INPUT_PULLUP);
+  pinMode(PIN_MULTIPLEXER_WATER_NOW_SIG, INPUT_PULLUP);
 }
+
+//---------- блок с кнопками принуд пролива и тумблером включения полива
+// растения
+
+void loopMultuplexer() {
+  Serial.print("Plants turned  ");
+  for (int i = 0; i < 16; i++) {
+    Serial.print(";");
+    Serial.print(i);
+    Serial.print("=");
+    digitalWrite(PIN_PLANT_MULTIPLEXER_S0, bitRead(i, 0));
+    digitalWrite(PIN_PLANT_MULTIPLEXER_S1, bitRead(i, 1));
+    digitalWrite(PIN_PLANT_MULTIPLEXER_S2, bitRead(i, 2));
+    digitalWrite(PIN_PLANT_MULTIPLEXER_S3, bitRead(i, 3));
+    int v = digitalRead(PIN_MULTIPLEXER_PLANT_TURN_ON_SIG);
+    Serial.print(v ? "_" : "0");
+  }
+  Serial.println();
+  Serial.print("Water plant now");
+  for (int i = 0; i < 16; i++) {
+    Serial.print(";");
+    Serial.print(i);
+    int pinI = plantsToButton[i];
+    Serial.print("=");
+    digitalWrite(PIN_PLANT_MULTIPLEXER_S0, bitRead(pinI, 0));
+    digitalWrite(PIN_PLANT_MULTIPLEXER_S1, bitRead(pinI, 1));
+    digitalWrite(PIN_PLANT_MULTIPLEXER_S2, bitRead(pinI, 2));
+    digitalWrite(PIN_PLANT_MULTIPLEXER_S3, bitRead(pinI, 3));
+    int v = digitalRead(PIN_MULTIPLEXER_WATER_NOW_SIG);
+    Serial.print(v ? "_" : "0");
+  }
+  Serial.println();
+}
+
+//---------- блок с помпой
 
 void startPomp() {
   writeln("Start pomp");
@@ -23,6 +76,8 @@ void stopPomp() {
   writeln("Stop pomp");
   digitalWrite(PIN_POMP, LOW);
 }
+
+// --------- блок с клапанами
 
 void turnOnValve(int id) {
   Serial.print("ON  valve ");

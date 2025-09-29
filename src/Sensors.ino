@@ -84,6 +84,7 @@ void loopSensors() {
   }
   if (true) {
     for (int i = 0; i < 16; i++) {
+      // --------------------- todo bitRead
       // Serial.print("i=");
       // Serial.print(i);
       // Serial.print("; bits=");

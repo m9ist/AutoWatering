@@ -34,7 +34,7 @@ void setup() {
 
   if (IS_DEBUG) {
     // initSensors();
-    // initPomp();
+    initPomp();
   }
 }
 
@@ -45,6 +45,8 @@ void loop() {
     // loopPomp();
     // loopClock();
     // loopScreen();
+    loopMultuplexer();
+    delay(3000);
     return;
   }
 
