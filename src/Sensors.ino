@@ -1,9 +1,14 @@
+#include <SHT31_SWW.h>
+
 #define PIN_SERNSOR_S0 26
 #define PIN_SERNSOR_S1 28
 #define PIN_SERNSOR_S2 30
 #define PIN_SERNSOR_S3 32
 
 #define PIN_UNPUT_SENSOR 0
+
+#define PIN_TEMP_SDA 19
+#define PINT_TEMP_SCL 21
 
 // Объявляем переменную для хранения времени последнего расчёта.
 uint32_t varTime = 0;
@@ -14,10 +19,21 @@ float varV = 0;
 // Объявляем переменную для хранения частоты импульсов (Гц).
 volatile uint16_t varF = 0;
 
+SoftwareWire wireTempSensor(PIN_TEMP_SDA, PINT_TEMP_SCL);
+SHT31_SWW sht31(0x44, &wireTempSensor);
+
 void funCountInt() { varF++; }
 
 void initSensors() {
   writeln("Start init sensors");
+
+  if (false) {
+    // работа с датчиком влажности и температуры
+    wireTempSensor.begin();
+    bool b = sht31.begin();
+    Serial.print("SHT31 connection: ");
+    Serial.println(b);
+  }
 
   if (false) {
     // работа с датчиком кол-ва воды
@@ -36,7 +52,9 @@ void initSensors() {
     pinMode(PIN_SERNSOR_S1, OUTPUT);  // s1
     pinMode(PIN_SERNSOR_S2, OUTPUT);
     pinMode(PIN_SERNSOR_S3, OUTPUT);
-    Serial.println("1   .2   .3   .4   .5   .6   .7   .8   .9   .10  .11  .12  .13  .14  .15  .16");
+    writeln(
+        "1   ;2   ;3   ;4   ;5   ;6   ;7   ;8   ;9   ;10  ;11  ;12  ;13  ;14  "
+        ";15  ;16 ;  date    ;time");
   }
 
   // 1 датчик на 1 выходе - через плату HW-080 ... 410 показания неподключенные
@@ -59,6 +77,16 @@ int loopId = 0;
 int measure_time = 10;
 
 void loopSensors() {
+  if (false) {
+    sht31.read(false);
+    float temp = sht31.getTemperature();
+    float hum = sht31.getHumidity();
+    Serial.print("t = ");
+    Serial.print(temp);
+    Serial.print(", h = ");
+    Serial.println(hum);
+    delay(3000);
+  }
   if (false) {
     //   Если прошла 1 секунда:
     // Если c момента последнего расчёта прошла 1 секунда,
@@ -83,35 +111,30 @@ void loopSensors() {
     }
   }
   if (true) {
+    String out = "";
     for (int i = 0; i < 16; i++) {
-      // --------------------- todo bitRead
-      // Serial.print("i=");
-      // Serial.print(i);
-      // Serial.print("; bits=");
-      int s0 = i % 2;
-      int s1 = (i / 2) % 2;
-      int s2 = (i / 4) % 2;
-      int s3 = (i / 8) % 2;
-      // Serial.print(s0);
-      // Serial.print(s1);
-      // Serial.print(s2);
-      // Serial.print(s3);
-      // Serial.print(" ... read value ... ");
-      // включаем пин 1
-      digitalWrite(PIN_SERNSOR_S0, s0 == 0 ? LOW : HIGH);
-      digitalWrite(PIN_SERNSOR_S1, s1 == 0 ? LOW : HIGH);
-      digitalWrite(PIN_SERNSOR_S2, s2 == 0 ? LOW : HIGH);
-      digitalWrite(PIN_SERNSOR_S3, s3 == 0 ? LOW : HIGH);
-      delay(100);
+      digitalWrite(PIN_SERNSOR_S0, bitRead(i, 0));
+      digitalWrite(PIN_SERNSOR_S1, bitRead(i, 1));
+      digitalWrite(PIN_SERNSOR_S2, bitRead(i, 2));
+      digitalWrite(PIN_SERNSOR_S3, bitRead(i, 3));
+      delay(50);
+      // 1023 - не подключен либо воздух
+      // 950-1013 - сухо
+      // 150-270 - в воде, начинается с 100 и "разгоняется", минуты 3 на
+      // устаканиться полили 20г на "с ушками"
+      // 328;384;429;301 13:43:42
+      // 429;671;648;489 13:46:42
+      // 455;697;705;570 13:51:16
+      // 526;754;711;680 14:02:15
       int read = analogRead(PIN_UNPUT_SENSOR);
-      Serial.print(read);
-      Serial.print(".");
+      out += read;
+      out += ";";
+      // Serial.print(read);
+      // Serial.print(";");
     }
-    Serial.println(".");
+    out += getDateAndTime();
+    writeln(out);
 
-    delay(2000);
-    // delay(1000);  // !!!!todo сменить на более "боевой" таймаут
-    // loopId++;
     // int data3 = analogRead(1);
     // // map(data, 579, 0, 0, 100)
     // String s = "Loop number;";

@@ -65,3 +65,28 @@ void loopClock() {
 
   delay(1000);
 }
+
+String getDateAndTime() {
+  String date;
+  Ds1302::DateTime now;
+  rtc.getDateTime(&now);
+
+  date += "20";
+  date += now.year;  // 00-99
+  date += "-";
+  if (now.month < 10) date += '0';
+  date += now.month;  // 01-12
+  date += '-';
+  if (now.day < 10) date += '0';
+  date += now.day;
+  date += ';';
+  if (now.hour < 10) date += '0';
+  date += now.hour;  // 00-23
+  date += ':';
+  if (now.minute < 10) date += '0';
+  date += now.minute;  // 00-59
+  date += ':';
+  if (now.second < 10) date += '0';
+  date += now.second;  // 00-59
+  return date;
+}

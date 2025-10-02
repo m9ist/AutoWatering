@@ -1,4 +1,4 @@
-#include <TimeLib.h>  // Timelib in library manager
+#include <State.h>
 
 #define IS_DEBUG true
 
@@ -6,47 +6,30 @@
 // Ctrl + Alt + B - компиляция
 // Ctrl + Alt + U - загрузка прошивки
 
-struct Plant {
-  String plantName;
-  int sensorPin;
-  int valvePin;
-  // сколько в попугаях влажности 1 .. 10, 11 - отключен, 12 - поливается
-  int parrots;
-
-  // последняя проверка датчика, при обновлении обнулять проверку
-  time_t lastCheck;
-  // после поливки надо бы сделать почаще проверку?? поливать мелкими порциями
-  // чтобы не залить? как часто поливать, принудительная поливка? при каком
-  // пороге влажности поливать сколько схавал воды сколько поливать воды, размер
-  // горшка?
-};
-
-struct State {
-  Plant plants[8];
-};
 
 void setup() {
   Serial.begin(9600);
   writeln("Hellow world!");
-  // initLogging();
-  // initClock();
-  // initScreen();
+  initLogging();
+  initClock();
+  initScreen();
 
   if (IS_DEBUG) {
-    // initSensors();
-    initPomp();
+    initSensors();
+    // initPomp();
   }
 }
 
 void loop() {
   // отладочный блок
   if (IS_DEBUG) {
-    // loopSensors();
+    loopSensors();
+    loopScreen();
+    delay(3000);
     // loopPomp();
     // loopClock();
     // loopScreen();
-    loopMultuplexer();
-    delay(3000);
+    // loopMultuplexer();
     return;
   }
 

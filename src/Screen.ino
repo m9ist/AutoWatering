@@ -34,30 +34,21 @@ void initScreen() {
 
   lcd.fillScreen(RED);
   lcd.setTextColor(WHITE, BLUE);
-  lcd.setTextSize(1);
-  lcd.setCursor(0, 0);
-  lcd.println("Plant 1 30% last 23.4h 12ml");  // using Adafruit default font
-  lcd.setCursor(0, 9);
-  lcd.println("Plant 2 30% last 23.4h 12ml");  // using Adafruit default font
-
   lcd.setTextSize(2);
+  lcd.setCursor(0, 0);
+  lcd.println("Hellow world");
   lcd.setCursor(0, 18);
-  lcd.println("Plant 2 30% 23.4h");  // using Adafruit default font
-  lcd.setCursor(0, 36);
-  lcd.println("Plant 3 30% 23.4h");  // using Adafruit default font
-
-  lcd.setTextSize(3);
-  lcd.setCursor(0, 54);
-  lcd.println("Plant 3 30% 23.4h");  // using Adafruit default font
 }
 
-int i = 0;
-
 void loopScreen() {
-  writeln("New loop");
-  lcd.setCursor(0, 54);
-  lcd.print("Plant 3 ");
-  lcd.print(++i % 10);
-  lcd.println("0% 23.4h");  // using Adafruit default font
-  delay(2000);
+  lcd.fillScreen(RED);
+  lcd.setTextColor(WHITE, BLUE);
+  lcd.setTextSize(2);
+  lcd.setCursor(0, 0);
+  lcd.println("Hellow world");
+  lcd.setCursor(0, 18);
+  lcd.print("SD card is ");
+  lcd.println(_sdIsInited);
+  lcd.setCursor(0, 36);
+  lcd.println(getDateAndTime());
 }
