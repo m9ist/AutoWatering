@@ -28,9 +28,6 @@ void initLogging() {
     return;
   }
 
-  if (!file.open("LOG.txt", FILE_WRITE)) {
-    sd.errorHalt(F("open file failed"));
-  }
   _sdIsInited = true;
   Serial.println(F("SD is inited."));
 }
@@ -40,8 +37,13 @@ void writeln(String dataString) {
   if (SD_TURNED_OFF || !_sdIsInited) {
     return;
   }
-  file.println(dataString);
-  file.flush();
+
+  if (!file.open("LOG.txt", FILE_WRITE)) {
+    Serial.println(F("open file failed"));
+  } else {
+    file.println(dataString);
+    file.close();
+  }
 }
 
 // int startup_melody[] = {784, 659, 523, 392};

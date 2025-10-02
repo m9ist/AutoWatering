@@ -11,14 +11,15 @@
 #define PIN_MULTIPLEXER_WATER_NOW_SIG 20
 #define PIN_MULTIPLEXER_PLANT_TURN_ON_SIG 18
 
-#define PIN_POMP -1
+#define PIN_POMP 35
 
 bool pompState = false;
 uint32_t currentState = 0;
 int plantsToButton[] = {1, 3, 5, 7, 8, 10, 12, 14, 0, 2, 4, 6, 9, 11, 13, 15};
 
 void initPomp() {
-  // pinMode(PIN_POMP, OUTPUT);
+  pinMode(PIN_POMP, OUTPUT);
+
   pinMode(PIN_REGISTER_CS, OUTPUT);
   pinMode(PIN_REGISTER_DAT, OUTPUT);
   pinMode(PIN_REGISTER_CLK, OUTPUT);
@@ -34,6 +35,33 @@ void initPomp() {
 
 //---------- блок с кнопками принуд пролива и тумблером включения полива
 // растения
+void updatePlantsState() {
+  String log = "Plants turned changed";
+  bool needPrint = false;
+  for (int i = 0; i < 16; i++) {
+    log += ';';
+    log += i;
+    log += '=';
+    digitalWrite(PIN_PLANT_MULTIPLEXER_S0, bitRead(i, 0));
+    digitalWrite(PIN_PLANT_MULTIPLEXER_S1, bitRead(i, 1));
+    digitalWrite(PIN_PLANT_MULTIPLEXER_S2, bitRead(i, 2));
+    digitalWrite(PIN_PLANT_MULTIPLEXER_S3, bitRead(i, 3));
+    bool v = digitalRead(PIN_MULTIPLEXER_PLANT_TURN_ON_SIG) != HIGH;
+    if (v) {
+      if (global_state.plants[i].isOn == PLANT_IS_OFF_USER) {
+        global_state.plants[i].isOn = PLANT_IS_ON;
+        needPrint = true;
+      }
+    } else {
+      if (global_state.plants[i].isOn == PLANT_IS_ON) {
+        global_state.plants[i].isOn = PLANT_IS_OFF_USER;
+        needPrint = true;
+      }
+    }
+    log += v ? '0' : '_';
+  }
+  if (needPrint) writeln(log);
+}
 
 void loopMultuplexer() {
   Serial.print("Plants turned  ");
@@ -63,6 +91,16 @@ void loopMultuplexer() {
     Serial.print(v ? "_" : "0");
   }
   Serial.println();
+}
+
+bool isWaterNowButtonPressed(int id) {
+  int pinI = plantsToButton[id];
+  digitalWrite(PIN_PLANT_MULTIPLEXER_S0, bitRead(pinI, 0));
+  digitalWrite(PIN_PLANT_MULTIPLEXER_S1, bitRead(pinI, 1));
+  digitalWrite(PIN_PLANT_MULTIPLEXER_S2, bitRead(pinI, 2));
+  digitalWrite(PIN_PLANT_MULTIPLEXER_S3, bitRead(pinI, 3));
+  int v = digitalRead(PIN_MULTIPLEXER_WATER_NOW_SIG);
+  return v == LOW;
 }
 
 //---------- блок с помпой

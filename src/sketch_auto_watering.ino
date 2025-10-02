@@ -1,3 +1,4 @@
+#include <Ds1302.h>
 #include <State.h>
 
 #define IS_DEBUG true
@@ -6,6 +7,7 @@
 // Ctrl + Alt + B - компиляция
 // Ctrl + Alt + U - загрузка прошивки
 
+State global_state;
 
 void setup() {
   Serial.begin(9600);
@@ -14,22 +16,52 @@ void setup() {
   initClock();
   initScreen();
 
-  if (IS_DEBUG) {
-    initSensors();
-    // initPomp();
-  }
+  initSensors();
+  initPomp();
 }
 
 void loop() {
-  // отладочный блок
+  for (int i = 0; i < 16; i++) {
+    if (isWaterNowButtonPressed(i)) {
+      String out = "Watering plant ";
+      out += i;
+      drawScreenMessage(out);
+      unsigned long t = millis();
+
+      turnOnValve(i);
+      startPomp();
+
+      while (isWaterNowButtonPressed(i)) {
+      }
+
+      stopPomp();
+      turnOffValve(i);
+      t = millis() - t;
+
+      out = "End watering ";
+      out += t;
+      drawScreenMessage(out);
+      delay(1000);
+      return;
+    }
+  }
+
+  if (runNextDayTask()) {
+    writeln("Runing daily task...");
+    delay(100);
+  }
+
+  updatePlantsState();
+  loopSensors();
+  delay(500);  // почему-то без этой задержки приложение падает...
+  loopScreen();
+  delay(3000);
+  // loopPomp();
+  // loopClock();
+  // loopScreen();
+  // loopMultuplexer();
+
   if (IS_DEBUG) {
-    loopSensors();
-    loopScreen();
-    delay(3000);
-    // loopPomp();
-    // loopClock();
-    // loopScreen();
-    // loopMultuplexer();
     return;
   }
 
@@ -39,10 +71,6 @@ void loop() {
   // Алисе потом уже синхронизация времени
 
   writeln("--->>> start main cycle");
-
-  if (checkAlisa()) {
-    return;
-  }
 
   // проверить надо ли обновлять стейт, сделать обновление
 
@@ -63,6 +91,6 @@ void loop() {
   // ---busy---, отослать статус "начали выполнять" и "выполнили"
 }
 
-void waterPlant(Plant plant) {}
+// void waterPlant(Plant plant) {}
 
-bool checkAlisa() {}
+// bool checkAlisa() {}

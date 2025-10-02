@@ -53,8 +53,8 @@ void initSensors() {
     pinMode(PIN_SERNSOR_S2, OUTPUT);
     pinMode(PIN_SERNSOR_S3, OUTPUT);
     writeln(
-        "1   ;2   ;3   ;4   ;5   ;6   ;7   ;8   ;9   ;10  ;11  ;12  ;13  ;14  "
-        ";15  ;16 ;  date    ;time");
+        "event  ;1   ;2   ;3   ;4   ;5   ;6   ;7   ;8   ;9   ;10  ;11  ;12  "
+        ";13  ;14  ;15  ;16 ;temp;hum;  date    ;time");
   }
 
   // 1 датчик на 1 выходе - через плату HW-080 ... 410 показания неподключенные
@@ -111,28 +111,29 @@ void loopSensors() {
     }
   }
   if (true) {
-    String out = "";
+    String out = "sensors;";
     for (int i = 0; i < 16; i++) {
       digitalWrite(PIN_SERNSOR_S0, bitRead(i, 0));
       digitalWrite(PIN_SERNSOR_S1, bitRead(i, 1));
       digitalWrite(PIN_SERNSOR_S2, bitRead(i, 2));
       digitalWrite(PIN_SERNSOR_S3, bitRead(i, 3));
-      delay(50);
-      // 1023 - не подключен либо воздух
-      // 950-1013 - сухо
-      // 150-270 - в воде, начинается с 100 и "разгоняется", минуты 3 на
-      // устаканиться полили 20г на "с ушками"
-      // 328;384;429;301 13:43:42
-      // 429;671;648;489 13:46:42
-      // 455;697;705;570 13:51:16
-      // 526;754;711;680 14:02:15
+      // delay(50);
       int read = analogRead(PIN_UNPUT_SENSOR);
       out += read;
+      global_state.plants[i].parrots =
+          constrain(map(read, 950, 350, 0, 100), 0, 99);
       out += ";";
       // Serial.print(read);
       // Serial.print(";");
     }
-    out += getDateAndTime();
+    sht31.read(false);
+    global_state.temperature = sht31.getTemperature();
+    global_state.humidity = sht31.getHumidity();
+    out += global_state.temperature;
+    out += ";";
+    out += global_state.humidity;
+    out += ";";
+    out += dateToString(getNow());
     writeln(out);
 
     // int data3 = analogRead(1);
@@ -144,3 +145,21 @@ void loopSensors() {
     // writeln(s);
   }
 }
+
+/*
+1023 - не подключен либо воздух
+950-1013 - сухо
+150-270 - в воде, начинается с 100 и "разгоняется", минуты 3 на устаканиться
+
+
+полили 20г на "с ушками"
+328;384;429;301 13:43:42
+429;671;648;489 13:46:42
+455;697;705;570 13:51:16
+526;754;711;680 14:02:15
+538;774;662;718 14:16:10
+608;815;656;772 14:54:35
+576;804;626;761 15:17:13
+593;808;608;813 16:32:34
+573;608;581;634 17:48:17
+*/

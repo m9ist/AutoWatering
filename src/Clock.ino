@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Ds1302.h>
+#include <time.h>
 
 #define PIN_ENA 41
 #define PIN_CLK 45
@@ -7,8 +8,17 @@
 
 Ds1302 rtc(PIN_ENA, PIN_CLK, PIN_DAT);
 
-const static char* WeekDays[] = {"Monday", "Tuesday",  "Wednesday", "Thursday",
-                                 "Friday", "Saturday", "Sunday"};
+// const static char* WeekDays[] = {"Monday", "Tuesday",  "Wednesday",
+// "Thursday", "Friday", "Saturday", "Sunday"};
+
+// Ds1302::DateTime nextTaskRuning;
+// Ds1302::DateTime startUpDate;
+
+Ds1302::DateTime getNow() {
+  Ds1302::DateTime now;
+  rtc.getDateTime(&now);
+  return now;
+}
 
 void initClock() {
   writeln("Init clock");
@@ -32,61 +42,93 @@ void initClock() {
 
     rtc.setDateTime(&dt);
   }
+  global_state.nextTaskRuning = getNow();
+  global_state.startUpDate = getNow();
 }
 
-void loopClock() {
-  if (rtc.isHalted()) {
-    Serial.println("RTC is halted.");
+String dateToString(Ds1302::DateTime now) {
+  String out;
+
+  out += "20";
+  out += now.year;  // 00-99
+  out += "-";
+  if (now.month < 10) out += '0';
+  out += now.month;  // 01-12
+  out += '-';
+  if (now.day < 10) out += '0';
+  out += now.day;
+  out += ';';
+  if (now.hour < 10) out += '0';
+  out += now.hour;  // 00-23
+  out += ':';
+  if (now.minute < 10) out += '0';
+  out += now.minute;  // 00-59
+  out += ':';
+  if (now.second < 10) out += '0';
+  out += now.second;  // 00-59
+  return out;
+}
+
+void normalizeDate(Ds1302::DateTime newDate) {
+  uint8_t daysInMonth = month_length(newDate.year, newDate.month - 1);
+
+  if (newDate.second >= 60) {
+    newDate.second = newDate.second - 60;
+    newDate.minute++;
   }
-  // get the current time
-  Ds1302::DateTime now;
-  rtc.getDateTime(&now);
 
-  Serial.print("20");
-  Serial.print(now.year);  // 00-99
-  Serial.print('-');
-  if (now.month < 10) Serial.print('0');
-  Serial.print(now.month);  // 01-12
-  Serial.print('-');
-  if (now.day < 10) Serial.print('0');
-  Serial.print(now.day);  // 01-31
-  Serial.print(' ');
-  Serial.print(WeekDays[now.dow - 1]);  // 1-7
-  Serial.print(' ');
-  if (now.hour < 10) Serial.print('0');
-  Serial.print(now.hour);  // 00-23
-  Serial.print(':');
-  if (now.minute < 10) Serial.print('0');
-  Serial.print(now.minute);  // 00-59
-  Serial.print(':');
-  if (now.second < 10) Serial.print('0');
-  Serial.print(now.second);  // 00-59
-  Serial.println();
+  if (newDate.minute >= 60) {
+    newDate.minute = newDate.minute - 60;
+    newDate.hour++;
+  }
 
-  delay(1000);
+  if (newDate.hour >= 24) {
+    newDate.hour = newDate.hour - 24;
+    newDate.day++;
+  }
+
+  if (newDate.day > daysInMonth) {
+    newDate.day = newDate.day - daysInMonth;
+    newDate.month++;
+  }
+
+  if (newDate.month > 12) {
+    newDate.month = newDate.month - 12;
+    newDate.year++;
+  }
 }
 
-String getDateAndTime() {
-  String date;
-  Ds1302::DateTime now;
-  rtc.getDateTime(&now);
+bool isNowAfter(Ds1302::DateTime check) {
+  Ds1302::DateTime now = getNow();
 
-  date += "20";
-  date += now.year;  // 00-99
-  date += "-";
-  if (now.month < 10) date += '0';
-  date += now.month;  // 01-12
-  date += '-';
-  if (now.day < 10) date += '0';
-  date += now.day;
-  date += ';';
-  if (now.hour < 10) date += '0';
-  date += now.hour;  // 00-23
-  date += ':';
-  if (now.minute < 10) date += '0';
-  date += now.minute;  // 00-59
-  date += ':';
-  if (now.second < 10) date += '0';
-  date += now.second;  // 00-59
-  return date;
+  if (check.year < now.year) return true;
+  if (check.year > now.year) return false;
+
+  if (check.month < now.month) return true;
+  if (check.month > now.month) return false;
+
+  if (check.day < now.day) return true;
+  if (check.day > now.day) return false;
+
+  if (check.hour < now.hour) return true;
+  if (check.hour > now.hour) return false;
+
+  if (check.minute < now.minute) return true;
+  if (check.minute > now.minute) return false;
+
+  return check.second < now.second;
+}
+
+bool runNextDayTask() {
+  if (isNowAfter(global_state.nextTaskRuning)) {
+    Serial.print(dateToString(global_state.nextTaskRuning));
+    Serial.print(" < ");
+    Serial.print(dateToString(getNow()));
+    Serial.println("!!!!!!!!!!!!!!!!!!!!");
+    global_state.nextTaskRuning = getNow();
+    global_state.nextTaskRuning.day++;
+    normalizeDate(global_state.nextTaskRuning);
+    return true;
+  }
+  return false;
 }
