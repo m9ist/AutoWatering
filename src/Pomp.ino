@@ -115,6 +115,32 @@ void stopPomp() {
   digitalWrite(PIN_POMP, LOW);
 }
 
+unsigned long timeCheck;
+
+void startWaterPlant(int id) {
+  String out = "Watering plant ";
+  out += id;
+  timeCheck = millis();
+  drawScreenMessage(out);
+
+  turnOnValve(id);
+  startPomp();
+}
+
+void stopWaterPlant(int id) {
+  stopPomp();
+  turnOffValve(id);
+
+  timeCheck = millis() - timeCheck;
+  String out = "End watering plant ";
+  out += id;
+  out += " in ";
+  out += timeCheck;
+  out += "ms";
+  drawScreenMessage(out);
+  delay(3000);
+}
+
 // --------- блок с клапанами
 
 void turnOnValve(int id) {

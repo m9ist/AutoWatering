@@ -25,10 +25,19 @@ LCD without CS) #06 DC  -> D10/PA1 or any digital #07 BLK -> NC
 #define SCR_WD 240
 #define SCR_HT 240
 
+#define PIN_CHECK_BUTTON 33
+#define PIN_UP_BUTTON 29
+#define PIN_DOWN_BUTTON 31
+#define PIN_MODE_BUTTON 27
+
 ST7789_AVR lcd = ST7789_AVR(TFT_DC, TFT_RES, TFT_CS);
 
 void initScreen() {
   writeln("Before lcd init");
+  pinMode(PIN_CHECK_BUTTON, INPUT_PULLUP);
+  pinMode(PIN_UP_BUTTON, INPUT_PULLUP);
+  pinMode(PIN_DOWN_BUTTON, INPUT_PULLUP);
+  pinMode(PIN_MODE_BUTTON, INPUT_PULLUP);
 
   lcd.init(SCR_WD, SCR_HT);
 
@@ -48,9 +57,9 @@ void drawScreenMessage(String message) {
   Serial.println(message);
   lastMessage = message;
 
-  lcd.fillScreen(MAGENTA);
-  lcd.setTextColor(WHITE, MAGENTA);
-  lcd.setTextSize(3);
+  lcd.fillScreen(YELLOW);
+  lcd.setTextColor(BLUE, YELLOW);
+  lcd.setTextSize(4);
   lcd.setCursor(0, 0);
   lcd.print(message);
 }
@@ -87,4 +96,24 @@ void loopScreen() {
   }
   lcd.setCursor(0, 18 * 6);
   lcd.println(out);
+}
+
+bool isCheckButtonPressed() {
+  int v = digitalRead(PIN_CHECK_BUTTON);
+  return v == LOW;
+}
+
+bool isUpButtonPressed() {
+  int v = digitalRead(PIN_UP_BUTTON);
+  return v == LOW;
+}
+
+bool isDownButtonPressed() {
+  int v = digitalRead(PIN_DOWN_BUTTON);
+  return v == LOW;
+}
+
+bool isModeButtonPressed() {
+  int v = digitalRead(PIN_MODE_BUTTON);
+  return v == LOW;
 }

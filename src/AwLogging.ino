@@ -60,3 +60,11 @@ void buzzerBoot() {
     delay(30);
   }
 }
+
+void buzzerCommand() {
+  Serial.println("Command melody");
+  tone(PIN_BUZZER, 1500, 200);
+  delay(230);
+  tone(PIN_BUZZER, 1000, 200);
+  delay(230);
+}

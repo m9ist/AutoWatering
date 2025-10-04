@@ -23,32 +23,30 @@ void setup() {
 void loop() {
   for (int i = 0; i < 16; i++) {
     if (isWaterNowButtonPressed(i)) {
-      String out = "Watering plant ";
-      out += i;
-      drawScreenMessage(out);
-      unsigned long t = millis();
-
-      turnOnValve(i);
-      startPomp();
+      startWaterPlant(i);
 
       while (isWaterNowButtonPressed(i)) {
       }
 
-      stopPomp();
-      turnOffValve(i);
-      t = millis() - t;
-
-      out = "End watering ";
-      out += t;
-      drawScreenMessage(out);
-      delay(1000);
+      stopWaterPlant(i);
       return;
     }
   }
 
-  if (runNextDayTask()) {
+  if (runNextDayTask() || isCheckButtonPressed()) { // todo revert
     writeln("Runing daily task...");
-    delay(100);
+    buzzerCommand();
+
+    // поливаем первое растение 20мл
+    startWaterPlant(0);
+    delay(7000);
+    stopWaterPlant(0);
+
+    // поливаем второе растение 5мл
+    startWaterPlant(1);
+    delay(1100);
+    stopWaterPlant(1);
+    return;
   }
 
   updatePlantsState();

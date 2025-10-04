@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Ds1302.h>
+#include <EEPROM.h>
 #include <time.h>
 
 #define PIN_ENA 41
@@ -18,32 +19,6 @@ Ds1302::DateTime getNow() {
   Ds1302::DateTime now;
   rtc.getDateTime(&now);
   return now;
-}
-
-void initClock() {
-  writeln("Init clock");
-  // initialize the RTC
-  rtc.init();
-  writeln("Clock inited");
-
-  // установить первоначальное время
-  if (false) {
-    writeln("RTC is halted. Setting time...");
-    // rtc.halt();
-    Ds1302::DateTime dt = {
-        .year = 25,
-        .month = Ds1302::MONTH_SET,  // в библиотеке опечатка, новая версия не
-                                     // подхватывается
-        .day = 25,
-        .hour = 10,
-        .minute = 45,
-        .second = 00,
-        .dow = Ds1302::DOW_THU};
-
-    rtc.setDateTime(&dt);
-  }
-  global_state.nextTaskRuning = getNow();
-  global_state.startUpDate = getNow();
 }
 
 String dateToString(Ds1302::DateTime now) {
@@ -67,6 +42,58 @@ String dateToString(Ds1302::DateTime now) {
   if (now.second < 10) out += '0';
   out += now.second;  // 00-59
   return out;
+}
+
+void initClock() {
+  writeln("Init clock");
+  // initialize the RTC
+  rtc.init();
+  writeln("Clock inited");
+
+  // установить первоначальное время
+  if (false) {
+    writeln("RTC is halted. Setting time...");
+    // rtc.halt();
+    Ds1302::DateTime dt = {
+        .year = 25,
+        .month = Ds1302::MONTH_OCT,  // в библиотеке опечатка, новая версия не
+                                     // подхватывается
+        .day = 3,
+        .hour = 14,
+        .minute = 34,
+        .second = 00,
+        .dow = Ds1302::DOW_FRI};
+
+    rtc.setDateTime(&dt);
+  }
+  loadNextTaskRuning();
+  if (false) {
+    Ds1302::DateTime firstAction;
+    firstAction.year = 25;
+    firstAction.month = 10;
+    firstAction.day = 3;
+    firstAction.hour = 15;
+    firstAction.minute = 0;
+    firstAction.second = 0;
+    global_state.nextTaskRuning = firstAction;
+    saveNextTaskRuning();
+  }
+
+  global_state.startUpDate = getNow();
+}
+
+void saveNextTaskRuning() {
+  int address = 0;
+  EEPROM.put(address, global_state.nextTaskRuning);
+  writeln("Saved next water task:");
+  writeln(dateToString(global_state.nextTaskRuning));
+}
+
+void loadNextTaskRuning() {
+  int address = 0;
+  EEPROM.get(address, global_state.nextTaskRuning);
+  writeln("Loaded next water task:");
+  writeln(dateToString(global_state.nextTaskRuning));
 }
 
 void normalizeDate(Ds1302::DateTime newDate) {
@@ -125,9 +152,12 @@ bool runNextDayTask() {
     Serial.print(" < ");
     Serial.print(dateToString(getNow()));
     Serial.println("!!!!!!!!!!!!!!!!!!!!");
+
     global_state.nextTaskRuning = getNow();
     global_state.nextTaskRuning.day++;
     normalizeDate(global_state.nextTaskRuning);
+    saveNextTaskRuning();
+
     return true;
   }
   return false;
