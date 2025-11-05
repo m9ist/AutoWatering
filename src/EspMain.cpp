@@ -2,6 +2,7 @@
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
 #include <SettingsGyver.h>
+#include <State.h>
 #include <WiFiClientSecure.h>
 #include <time.h>
 
@@ -25,6 +26,29 @@ int slider;
 String input;
 bool updatedSettings = false;
 
+String getTimestamp() {
+  time_t now = time(nullptr);
+  struct tm timeinfo;
+  gmtime_r(&now, &timeinfo);
+
+  char buffer[20];
+  strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+  return String(buffer);
+}
+
+void serialLog(const String& command, const String& s) {
+  JsonDocument response;
+  response["command"] = command;
+  response["timestamp"] = getTimestamp();
+  response["log"] = s;
+
+  String responseJson;
+  serializeJson(response, responseJson);
+  Serial.println(responseJson);
+}
+
+void serialLog(const String& s) { serialLog(esp_command_log, s); }
+
 void build(sets::Builder& b) {
   b.Slider("My slider", 0, 50, 1, "ml", &slider);
   b.Input("My input", &input);
@@ -41,16 +65,6 @@ void updateSettings(sets::Updater& u) {}
 String getBearerAuthKey() {
   // если пустой или прошел час, то обновляем
   return secretKey;
-}
-
-String getTimestamp() {
-  time_t now = time(nullptr);
-  struct tm timeinfo;
-  gmtime_r(&now, &timeinfo);
-
-  char buffer[20];
-  strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
-  return String(buffer);
 }
 
 void processCommand(String command, JsonDocument& doc) {
@@ -79,7 +93,7 @@ void processCommand(String command, JsonDocument& doc) {
 
 void setupWifiClient() {
   // Настройка безопасного соединения
-  Serial.println("Setup secure wifi...");
+  serialLog("Setup secure wifi...");
   // BearSSL::X509List xYa(ya_sert);
   // espClient.setTrustAnchors(&xYa);
   espClient.setInsecure();
@@ -87,54 +101,75 @@ void setupWifiClient() {
   BearSSL::PrivateKey* privKey = new BearSSL::PrivateKey(privateCert().c_str());
   espClient.setClientRSACert(&x509, privKey);
 
-  Serial.println("Check connection...");
+  serialLog("Check connection...");
   if (!espClient.connect(yandex_iot_endpoint, yandex_iot_port)) {
-    Serial.println("Connection to iot failed.");
-    Serial.println(espClient.getLastSSLError());
+    serialLog("Connection to iot failed. error = " +
+              espClient.getLastSSLError());
   } else {
-    Serial.println("Connection to iot is tested.");
+    serialLog("Connection to iot is tested.");
   }
 }
 
-void setup(void) {
-  Serial.begin(9600);
-  Serial.println("\nStart working");
+bool isTimeInited() { return time(nullptr) > 1000000000; }
+
+void checkWifi() {
+  if (WiFi.status() == WL_CONNECTED) {
+    return;
+  }
+
+  while (WiFi.status() != WL_CONNECTED) {  // Ожидаем подключения к Wi-Fi
+    serialLog(esp_command_connect_wifi, "Waiting wi-fi");
+    delay(1000);
+  }
+
+  // Выводим информацию о подключении
+  serialLog(esp_command_inited, "Connected to " + ssid());
+  serialLog(WiFi.localIP().toString());
+}
+
+void setup() {
+  if (true) {
+    Serial.begin(115200);  // для общения с ардуино
+  } else {
+    Serial.begin(9600);  // для отладки
+    delay(3000);
+  }
+
+  serialLog(esp_command_start_work, "Start working");
 
   // Устанавливаем Wi-Fi модуль в режим клиента (STA)
   WiFi.mode(WIFI_STA);
   // Устанавливаем ssid и пароль от сети, подключаемся
   WiFi.begin(ssid(), wifiPasswork());
-
-  while (WiFi.status() != WL_CONNECTED) {  // Ожидаем подключения к Wi-Fi
-    delay(500);
-    Serial.print(".");
-  }
-
-  // Выводим информацию о подключении
-  Serial.println("");
-  Serial.print("Connected to ");
-  Serial.println(ssid());
-  Serial.print("IP: ");
-  Serial.println(WiFi.localIP());
-
-  Serial.println("Setup time");
-  configTime(3 * 3600, 0, "ntp6.ntp-servers.net	", "1.ru.pool.ntp.org",
-             "ntp.ix.ru");
-  Serial.println(getTimestamp());
-
+  checkWifi();
   // setupWifiClient();
+
+  serialLog("Start sync time");
+  configTime("UTC+3", "ntp6.ntp-servers.net	", "1.ru.pool.ntp.org",
+             "ntp.ix.ru");
+  while (!isTimeInited()) {
+    serialLog("Waiting for time sync...");
+    delay(1000);
+  }
+  serialLog("Time was synchronized");
 
   sett.begin();
   sett.onBuild(build);
   sett.onUpdate(updateSettings);
 }
 
-void loop(void) {
-  if (true) {
-    sett.tick();
+void loop() {
+  if (Serial.available() > 0) {
+    String command = Serial.readStringUntil('\n');
+    serialLog(command);
     return;
   }
-  Serial.println("Start sending message...");
+
+  if (true) {
+    return;
+  }
+
+  serialLog("Start sending message...");
   HTTPClient https;
   String url = "https://";
   url += yandex_iot_endpoint;
@@ -160,12 +195,11 @@ void loop(void) {
   String json;
   serializeJson(doc, json);
 
-  Serial.println("post: " + json);
+  serialLog("post: " + json);
   int httpCode = https.POST(json);
-  Serial.println("got result");
-  Serial.println(httpCode);
+  serialLog("got result " + httpCode);
   String response = https.getString();
-  Serial.println("Response: " + response);
+  serialLog("Response: " + response);
   https.end();
 
   delay(5000);

@@ -11,7 +11,11 @@ State global_state;
 
 void setup() {
   Serial.begin(9600);
+  Serial3.begin(115200);
   writeln("Hellow world!");
+  if (IS_DEBUG) {
+    return;
+  }
   initLogging();
   initClock();
   initScreen();
@@ -20,7 +24,27 @@ void setup() {
   initPomp();
 }
 
+uint32_t test_time = 0;
+
 void loop() {
+  if (IS_DEBUG) {
+    if (Serial3.available() > 0) {
+      String command = Serial3.readStringUntil('\n');
+      writeln(command);
+      // todo process command
+      return;
+    }
+
+    if (test_time < millis()) {
+      test_time = millis() + 1000;
+      Serial3.println("ping from arduino");
+      return;
+    }
+
+    return;
+  }
+  
+
   for (int i = 0; i < 16; i++) {
     if (isWaterNowButtonPressed(i)) {
       startWaterPlant(i);
@@ -33,7 +57,7 @@ void loop() {
     }
   }
 
-  if (runNextDayTask() || isCheckButtonPressed()) { // todo revert
+  if (runNextDayTask()) {
     writeln("Runing daily task...");
     buzzerCommand();
 

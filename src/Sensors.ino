@@ -8,18 +8,20 @@
 #define PIN_UNPUT_SENSOR 0
 
 #define PIN_TEMP_SDA 19
-#define PINT_TEMP_SCL 21
+#define PIN_TEMP_SCL 21
+
+#define PIN_WATER_FLOW_SENSOR 2
 
 // Объявляем переменную для хранения времени последнего расчёта.
 uint32_t varTime = 0;
-// Объявляем переменную для хранения рассчитанной скорости потока воды (л/с).
+// Объявляем переменную для хранения рассчитанной скорости потока воды (мл/с).
 float varQ = 0;
-// Объявляем переменную для хранения рассчитанного объема воды (л).
+// Объявляем переменную для хранения рассчитанного объема воды (мл).
 float varV = 0;
 // Объявляем переменную для хранения частоты импульсов (Гц).
 volatile uint16_t varF = 0;
 
-SoftwareWire wireTempSensor(PIN_TEMP_SDA, PINT_TEMP_SCL);
+SoftwareWire wireTempSensor(PIN_TEMP_SDA, PIN_TEMP_SCL);
 SHT31_SWW sht31(0x44, &wireTempSensor);
 
 void funCountInt() { varF++; }
@@ -27,22 +29,19 @@ void funCountInt() { varF++; }
 void initSensors() {
   writeln("Start init sensors");
 
-  if (false) {
-    // работа с датчиком влажности и температуры
-    wireTempSensor.begin();
-    bool b = sht31.begin();
-    Serial.print("SHT31 connection: ");
-    Serial.println(b);
-  }
+  // работа с датчиком влажности и температуры
+  wireTempSensor.begin();
+  bool b = sht31.begin();
+  Serial.print("SHT31 connection: "); //todo вынести в стейт
+  Serial.println(b);
 
-  if (false) {
+  if (true) {
     // работа с датчиком кол-ва воды
-    int pinSensor = 18;
-    pinMode(pinSensor, INPUT);
-    uint8_t intSensor = digitalPinToInterrupt(pinSensor);
+    pinMode(PIN_WATER_FLOW_SENSOR, INPUT);
+    uint8_t intSensor = digitalPinToInterrupt(PIN_WATER_FLOW_SENSOR);
     attachInterrupt(intSensor, funCountInt, RISING);
     if (intSensor < 0) {
-      Serial.print("Указан вывод без EXT INT");
+      Serial.println("!!!!!!!!!!!!!Указан вывод без EXT INT");
     }
   }
 
@@ -87,7 +86,7 @@ void loopSensors() {
     Serial.println(hum);
     delay(3000);
   }
-  if (false) {
+  if (true) {
     //   Если прошла 1 секунда:
     // Если c момента последнего расчёта прошла 1 секунда,
     //  Определяем скорость и расход воды:
@@ -98,16 +97,16 @@ void loopSensors() {
       uint32_t varTmp = varF;
       varF = 0;
 
-      // Определяем скорость потока воды л/с.
-      varQ = varTmp / ((float)varTmp * 5.9f +
+      // Определяем скорость потока воды мл/с.
+      varQ = varTmp * 1000.0f / ((float)varTmp * 5.9f +
                        4570.0f);  // todo добавить нормировку по милисекундам
       // Сохраняем  время последних вычислений.
       varTime = millis();
-      // Определяем объем воды л.
+      // Определяем объем воды мл.
       varV += varQ;
       //  Выводим рассчитанные данные:
-      Serial.println((String) "Объем " + varV + "л, скорость " +
-                     (varQ * 60.0f) + "л/м.");
+      Serial.println((String) "Объем " + varV + "мл, скорость " +
+                     (varQ * 60.0f) + "мл/м.");
     }
   }
   if (true) {

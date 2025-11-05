@@ -3,6 +3,11 @@
 #define PLANT_IS_ON 10
 #define PLANT_IS_OFF_USER 0
 
+const char* esp_command_log = "esp_log";
+const char* esp_command_start_work = "esp_start_working";
+const char* esp_command_connect_wifi = "esp_wait_wifi";
+const char* esp_command_inited = "esp_inited";
+
 struct Plant {
   // краткое описание растения (горшок, название и тд)
   String plantName;
