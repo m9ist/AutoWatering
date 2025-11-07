@@ -33,7 +33,7 @@ LCD without CS) #06 DC  -> D10/PA1 or any digital #07 BLK -> NC
 ST7789_AVR lcd = ST7789_AVR(TFT_DC, TFT_RES, TFT_CS);
 
 void initScreen() {
-  writeln("Before lcd init");
+  writeln("Start display init");
   pinMode(PIN_CHECK_BUTTON, INPUT_PULLUP);
   pinMode(PIN_UP_BUTTON, INPUT_PULLUP);
   pinMode(PIN_DOWN_BUTTON, INPUT_PULLUP);
@@ -41,12 +41,13 @@ void initScreen() {
 
   lcd.init(SCR_WD, SCR_HT);
 
-  lcd.fillScreen(RED);
+  lcd.fillScreen(YELLOW);
   lcd.setTextColor(WHITE, BLUE);
-  lcd.setTextSize(2);
-  lcd.setCursor(0, 0);
-  lcd.println("Hellow world");
-  lcd.setCursor(0, 18);
+  lcd.setTextSize(5);
+  lcd.setCursor(25, 50);
+  lcd.println("Hellow");
+  lcd.setCursor(35, 100);
+  lcd.println("world");
   delay(1000);
 }
 
@@ -64,26 +65,31 @@ void drawScreenMessage(String message) {
   lcd.print(message);
 }
 
+uint16_t getFont(bool isGood) { return BLACK; }
+
+uint16_t getBackground(bool isGood) { return isGood ? GREEN : RED; }
+
+// всего помещается 12 строчек, последняя с доп сдвигом на 5 пикселей
 void loopScreen() {
-  if (_sdIsInited) {
-    lcd.fillScreen(GREEN);
-  } else {
-    lcd.fillScreen(RED);
-  }
-  lcd.setTextColor(WHITE, BLUE);
+  bool state = global_state.sdInited;
+  lcd.fillScreen(getBackground(state));
+  lcd.setTextColor(getFont(state), getBackground(state));
   lcd.setTextSize(2);
-  lcd.setCursor(0, 0);
-  lcd.print("SD card is ");
-  lcd.println(_sdIsInited);
-  lcd.setCursor(0, 18);
+
+  int stepx = 1;
+  int stepy = 1;
+  int lineHeight = 18;
+  int lineId = 0;
+
+  lcd.setCursor(stepx, stepy + lineHeight * lineId++);
   lcd.println(dateToString(getNow()));
-  lcd.setCursor(0, 18 * 2);
+  lcd.setCursor(stepx, stepy + lineHeight * lineId++);
   lcd.println("Next task runing");
-  lcd.setCursor(0, 18 * 3);
+  lcd.setCursor(stepx, stepy + lineHeight * lineId++);
   lcd.println(dateToString(global_state.nextTaskRuning));
-  lcd.setCursor(0, 18 * 4);
+  lcd.setCursor(stepx, stepy + lineHeight * lineId++);
   lcd.println("Start app date");
-  lcd.setCursor(0, 18 * 5);
+  lcd.setCursor(stepx, stepy + lineHeight * lineId++);
   lcd.println(dateToString(global_state.startUpDate));
 
   String out = "Sensors";
@@ -94,8 +100,17 @@ void loopScreen() {
     out += '=';
     out += global_state.plants[i].parrots;
   }
-  lcd.setCursor(0, 18 * 6);
+  lcd.setCursor(stepx, stepy + lineHeight * lineId++);
   lcd.println(out);
+
+  lcd.setCursor(stepx, stepy + 5 + lineHeight * 12);
+  lcd.setTextColor(getFont(global_state.sdInited),
+                   getBackground(global_state.sdInited));
+  lcd.print("SD");
+  lcd.setTextColor(getFont(state), getBackground(state));
+  lcd.print(" ");
+  // lcd.setTextColor(getFont(false), getBackground(false));
+  // lcd.print("SD");
 }
 
 bool isCheckButtonPressed() {

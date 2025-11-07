@@ -33,72 +33,35 @@ void initPomp() {
   pinMode(PIN_MULTIPLEXER_WATER_NOW_SIG, INPUT_PULLUP);
 }
 
-//---------- блок с кнопками принуд пролива и тумблером включения полива
-// растения
+void multiplexPlant(int id) {
+  digitalWrite(PIN_PLANT_MULTIPLEXER_S0, bitRead(id, 0));
+  digitalWrite(PIN_PLANT_MULTIPLEXER_S1, bitRead(id, 1));
+  digitalWrite(PIN_PLANT_MULTIPLEXER_S2, bitRead(id, 2));
+  digitalWrite(PIN_PLANT_MULTIPLEXER_S3, bitRead(id, 3));
+}
+
+// обновляет включено ли юзером растение на тумблере
 void updatePlantsState() {
-  String log = "Plants turned changed";
-  bool needPrint = false;
-  for (int i = 0; i < 16; i++) {
-    log += ';';
-    log += i;
-    log += '=';
-    digitalWrite(PIN_PLANT_MULTIPLEXER_S0, bitRead(i, 0));
-    digitalWrite(PIN_PLANT_MULTIPLEXER_S1, bitRead(i, 1));
-    digitalWrite(PIN_PLANT_MULTIPLEXER_S2, bitRead(i, 2));
-    digitalWrite(PIN_PLANT_MULTIPLEXER_S3, bitRead(i, 3));
+  for (int i = 0; i < PLANTS_AMOUNT; i++) {
+    multiplexPlant(i);
     bool v = digitalRead(PIN_MULTIPLEXER_PLANT_TURN_ON_SIG) != HIGH;
     if (v) {
       if (global_state.plants[i].isOn == PLANT_IS_OFF_USER) {
         global_state.plants[i].isOn = PLANT_IS_ON;
-        needPrint = true;
+        stateUpdated();
       }
     } else {
       if (global_state.plants[i].isOn == PLANT_IS_ON) {
         global_state.plants[i].isOn = PLANT_IS_OFF_USER;
-        needPrint = true;
+        stateUpdated();
       }
     }
-    log += v ? '0' : '_';
   }
-  if (needPrint) writeln(log);
-}
-
-void loopMultuplexer() {
-  Serial.print("Plants turned  ");
-  for (int i = 0; i < 16; i++) {
-    Serial.print(";");
-    Serial.print(i);
-    Serial.print("=");
-    digitalWrite(PIN_PLANT_MULTIPLEXER_S0, bitRead(i, 0));
-    digitalWrite(PIN_PLANT_MULTIPLEXER_S1, bitRead(i, 1));
-    digitalWrite(PIN_PLANT_MULTIPLEXER_S2, bitRead(i, 2));
-    digitalWrite(PIN_PLANT_MULTIPLEXER_S3, bitRead(i, 3));
-    int v = digitalRead(PIN_MULTIPLEXER_PLANT_TURN_ON_SIG);
-    Serial.print(v ? "_" : "0");
-  }
-  Serial.println();
-  Serial.print("Water plant now");
-  for (int i = 0; i < 16; i++) {
-    Serial.print(";");
-    Serial.print(i);
-    int pinI = plantsToButton[i];
-    Serial.print("=");
-    digitalWrite(PIN_PLANT_MULTIPLEXER_S0, bitRead(pinI, 0));
-    digitalWrite(PIN_PLANT_MULTIPLEXER_S1, bitRead(pinI, 1));
-    digitalWrite(PIN_PLANT_MULTIPLEXER_S2, bitRead(pinI, 2));
-    digitalWrite(PIN_PLANT_MULTIPLEXER_S3, bitRead(pinI, 3));
-    int v = digitalRead(PIN_MULTIPLEXER_WATER_NOW_SIG);
-    Serial.print(v ? "_" : "0");
-  }
-  Serial.println();
 }
 
 bool isWaterNowButtonPressed(int id) {
   int pinI = plantsToButton[id];
-  digitalWrite(PIN_PLANT_MULTIPLEXER_S0, bitRead(pinI, 0));
-  digitalWrite(PIN_PLANT_MULTIPLEXER_S1, bitRead(pinI, 1));
-  digitalWrite(PIN_PLANT_MULTIPLEXER_S2, bitRead(pinI, 2));
-  digitalWrite(PIN_PLANT_MULTIPLEXER_S3, bitRead(pinI, 3));
+  multiplexPlant(pinI);
   int v = digitalRead(PIN_MULTIPLEXER_WATER_NOW_SIG);
   return v == LOW;
 }
@@ -138,34 +101,24 @@ void stopWaterPlant(int id) {
   out += timeCheck;
   out += "ms";
   drawScreenMessage(out);
-  delay(3000);
+  delay(3000); //todo подумать как отказаться от этого, обдумать всю схему работы с экраном
 }
 
 // --------- блок с клапанами
 
 void turnOnValve(int id) {
-  Serial.print("ON  valve ");
-  Serial.print(id);
-  Serial.print(" state = ");
-  Serial.print(currentState);
-
+  String out = "ON valve";
+  out += id;
+  writeln(out);
   bitWrite(currentState, patchValveId(id), HIGH);
-  Serial.print(", new state = ");
-  Serial.print(currentState);
-
   sendNewStateValves(currentState);
 }
 
 void turnOffValve(int id) {
-  Serial.print("OFF valve ");
-  Serial.print(id);
-  Serial.print(" state = ");
-  Serial.print(currentState, BIN);
-
+   String out = "OFF valve";
+  out += id;
+  writeln(out);
   bitWrite(currentState, patchValveId(id), LOW);
-  Serial.print(", new state = ");
-  Serial.print(currentState, BIN);
-
   sendNewStateValves(currentState);
 }
 
@@ -181,6 +134,7 @@ int patchValveId(int id) {
   }
 }
 
+// мы можем включать/выключать нужное кол-во клапанов через эту функцию
 void sendNewStateValves(uint32_t state) {
   // Устанавливаем 1 в соответствующий бит
   // 16 бит необходимо разделить на два байта:
@@ -194,46 +148,9 @@ void sendNewStateValves(uint32_t state) {
   digitalWrite(PIN_REGISTER_CS, LOW);
 
   // Последовательная передача данных на пин DS
-  Serial.print("; send to shift registers ");
-  Serial.print(register3);
   shiftOut(PIN_REGISTER_DAT, PIN_REGISTER_CLK, MSBFIRST, register3);
-  Serial.print(" ");
-  Serial.print(register2);
   shiftOut(PIN_REGISTER_DAT, PIN_REGISTER_CLK, MSBFIRST, register2);
-  Serial.print(" ");
-  Serial.println(register1);
   shiftOut(PIN_REGISTER_DAT, PIN_REGISTER_CLK, MSBFIRST, register1);
 
   digitalWrite(PIN_REGISTER_CS, HIGH);
-}
-
-uint32_t pompVarTime = 0;
-int nextTime = 5000;
-bool turnedOn = false;
-
-void loopPomp() {
-  for (int i = 0; i < 16; i++) {
-    turnOnValve(i);
-    delay(4000);
-    turnOffValve(i);
-    delay(1000);
-  }
-  Serial.println("---------------------");
-
-  if (true) {
-    return;
-  }
-  if ((pompVarTime + nextTime) < millis() || pompVarTime > millis()) {
-    // Сохраняем  время последних вычислений.
-    pompVarTime = millis();
-    if (turnedOn) {
-      stopPomp();
-      turnedOn = false;
-      nextTime = 5000;
-    } else {
-      startPomp();
-      turnedOn = true;
-      nextTime = 1000;
-    }
-  }
 }

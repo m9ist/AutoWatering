@@ -21,27 +21,9 @@ Ds1302::DateTime getNow() {
   return now;
 }
 
-String dateToString(Ds1302::DateTime now) {
-  String out;
-
-  out += "20";
-  out += now.year;  // 00-99
-  out += "-";
-  if (now.month < 10) out += '0';
-  out += now.month;  // 01-12
-  out += '-';
-  if (now.day < 10) out += '0';
-  out += now.day;
-  out += ';';
-  if (now.hour < 10) out += '0';
-  out += now.hour;  // 00-23
-  out += ':';
-  if (now.minute < 10) out += '0';
-  out += now.minute;  // 00-59
-  out += ':';
-  if (now.second < 10) out += '0';
-  out += now.second;  // 00-59
-  return out;
+void stateUpdated() {
+  // todo подумать о том, чтобы сохранять источник, время, "широту обновления"
+  global_state.updated = true;
 }
 
 void initClock() {

@@ -3,8 +3,10 @@
 #include <ESP8266WiFi.h>
 #include <SettingsGyver.h>
 #include <State.h>
+#include <Timer.h>
 #include <WiFiClientSecure.h>
 #include <time.h>
+#include <ArduinoOTA.h>
 
 // Блок из SecretHolder, чтобы не заводить лишний .h файл, нужно там реализовать
 // эти методы
@@ -26,6 +28,11 @@ int slider;
 String input;
 bool updatedSettings = false;
 
+Timer timerStateSend;
+const Duration repeatIntervalStateSend = Timer::Minutes(30);
+bool stateSended = true;
+State lastState;
+
 String getTimestamp() {
   time_t now = time(nullptr);
   struct tm timeinfo;
@@ -38,7 +45,7 @@ String getTimestamp() {
 
 void serialLog(const String& command, const String& s) {
   JsonDocument response;
-  response["command"] = command;
+  response[command_key] = command;
   response["timestamp"] = getTimestamp();
   response["log"] = s;
 
@@ -48,6 +55,8 @@ void serialLog(const String& command, const String& s) {
 }
 
 void serialLog(const String& s) { serialLog(esp_command_log, s); }
+
+void serialError(const String& s) { serialLog(esp_command_log, s); }
 
 void build(sets::Builder& b) {
   b.Slider("My slider", 0, 50, 1, "ml", &slider);
@@ -117,14 +126,55 @@ void checkWifi() {
     return;
   }
 
+  int i = 0;
   while (WiFi.status() != WL_CONNECTED) {  // Ожидаем подключения к Wi-Fi
     serialLog(esp_command_connect_wifi, "Waiting wi-fi");
     delay(1000);
+    i++;
+    if (i > 15) {
+      serialLog("Unable to connect wifi, restart.");
+      ESP.restart();
+    }
   }
 
   // Выводим информацию о подключении
   serialLog(esp_command_inited, "Connected to " + ssid());
   serialLog(WiFi.localIP().toString());
+}
+
+void setupOTA() {
+  ArduinoOTA.onStart([]() {
+    String type;
+    if (ArduinoOTA.getCommand() == U_FLASH) {
+      type = "sketch";
+    } else {  // U_FS
+      type = "filesystem";
+    }
+
+    // NOTE: if updating FS this would be the place to unmount FS using FS.end()
+    serialLog("Start updating " + type);
+  });
+  ArduinoOTA.onEnd([]() {
+    serialLog("End");
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("Error[%u]: ", error);
+    if (error == OTA_AUTH_ERROR) {
+      Serial.println("Auth Failed");
+    } else if (error == OTA_BEGIN_ERROR) {
+      Serial.println("Begin Failed");
+    } else if (error == OTA_CONNECT_ERROR) {
+      Serial.println("Connect Failed");
+    } else if (error == OTA_RECEIVE_ERROR) {
+      Serial.println("Receive Failed");
+    } else if (error == OTA_END_ERROR) {
+      Serial.println("End Failed");
+    }
+  });
+  ArduinoOTA.begin();
 }
 
 void setup() {
@@ -142,6 +192,7 @@ void setup() {
   // Устанавливаем ssid и пароль от сети, подключаемся
   WiFi.begin(ssid(), wifiPasswork());
   checkWifi();
+  setupOTA();
   // setupWifiClient();
 
   serialLog("Start sync time");
@@ -156,20 +207,16 @@ void setup() {
   sett.begin();
   sett.onBuild(build);
   sett.onUpdate(updateSettings);
+
+  timerStateSend.setDuration(repeatIntervalStateSend);
 }
 
-void loop() {
-  if (Serial.available() > 0) {
-    String command = Serial.readStringUntil('\n');
-    serialLog(command);
-    return;
-  }
-
-  if (true) {
-    return;
-  }
-
+void sendMessageToIOT() {
   serialLog("Start sending message...");
+  if (true) {
+    serialLog("Communication with iot is turned off, exit.");
+    return;
+  }
   HTTPClient https;
   String url = "https://";
   url += yandex_iot_endpoint;
@@ -201,6 +248,72 @@ void loop() {
   String response = https.getString();
   serialLog("Response: " + response);
   https.end();
+}
 
-  delay(5000);
+void processMessage(String message) {
+  serialLog(message);
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, message);
+  if (error != DeserializationError::Ok) {
+    serialError((String) "Can't deserialize " + error.c_str());
+  } else {
+    const char* command = doc[command_key];
+    if (strcmp(command, arduino_command_state) == 0) {
+      State state = deserializeState(doc);
+      lastState = state;
+      stateSended = false;
+
+      if (false) {
+        // в случае если нужна отладка того, что десериализовалось
+        JsonDocument des = serializeState(state);
+        String outJson;
+        serializeJson(des, outJson);
+        serialLog((String) "Deserialized (and serialized): " + outJson);
+      }
+    } else {
+      serialError((String) "Unknown command " + command);
+    }
+  }
+}
+
+void loop() {
+  ArduinoOTA.handle();
+
+  if (Serial.available() > 0) {
+    String message = Serial.readStringUntil('\n');
+    message.trim();
+    processMessage(message);
+    return;
+  }
+
+  sett.tick();
+
+  if (timerStateSend.expired()) {
+    timerStateSend.setDuration(repeatIntervalStateSend);
+    sendMessageToIOT();
+    return;
+  }
+
+  if (false) {
+    processMessage(
+        "{\"temperature\":-45,\"humidity\":0,\"plants\":[{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":505},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":505},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":504},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":504},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":503},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":503},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":503},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":502},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":502},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":502},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":501},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":501},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":501},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":75,\"originalValue\":500},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":75,\"originalValue\":500},{\"isOn\":0,"
+        "\"plantName\":\"\",\"parrots\":75,\"originalValue\":500}],\"command\":"
+        "\"arduino_state_update\"}");
+    delay(2000);
+  }
 }

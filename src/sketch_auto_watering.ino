@@ -1,5 +1,6 @@
 #include <Ds1302.h>
 #include <State.h>
+#include <Timer.h>
 
 #define IS_DEBUG true
 
@@ -9,41 +10,46 @@
 
 State global_state;
 
+Timer timerSensorsCheck;
+const Duration repeatIntervalSensorsCheck = Timer::Minutes(1);
+
 void setup() {
   Serial.begin(9600);
   Serial3.begin(115200);
-  writeln("Hellow world!");
-  if (IS_DEBUG) {
-    return;
-  }
+  writeln("Start working");
   initLogging();
   initClock();
   initScreen();
 
   initSensors();
   initPomp();
+
+  timerSensorsCheck.setDuration(repeatIntervalSensorsCheck);
 }
 
 uint32_t test_time = 0;
 
 void loop() {
-  if (IS_DEBUG) {
-    if (Serial3.available() > 0) {
-      String command = Serial3.readStringUntil('\n');
-      writeln(command);
-      // todo process command
-      return;
-    }
-
-    if (test_time < millis()) {
-      test_time = millis() + 1000;
-      Serial3.println("ping from arduino");
-      return;
-    }
-
+  // сначала делаем дешевые операции, все дорогие делаем в конце функции
+  if (Serial3.available() > 0) {
+    String message = Serial3.readStringUntil('\n');
+    message.trim();
+    writeln(message);
+    // todo process command
     return;
   }
-  
+
+  if (global_state.updated) {
+    JsonDocument toSend = serializeState(global_state);
+    toSend[command_key] = arduino_command_state;
+    String outJson;
+    serializeJson(toSend, outJson);
+    Serial3.println(outJson);
+    writeln(outJson);
+    global_state.updated = false;
+    loopScreen();  // todo придумать более красивую схему обновления экрана
+    return;
+  }
 
   for (int i = 0; i < 16; i++) {
     if (isWaterNowButtonPressed(i)) {
@@ -53,11 +59,25 @@ void loop() {
       }
 
       stopWaterPlant(i);
+      loopScreen();
       return;
     }
   }
 
-  if (runNextDayTask()) {
+  updatePlantsState();
+
+  if (timerSensorsCheck.expired()) {
+    timerSensorsCheck.setDuration(repeatIntervalSensorsCheck);
+    loopSensors();
+    return;
+  }
+
+  if (true) {
+    return;
+  }
+
+  if (runNextDayTask()) { //todo проверка на корректность времени
+    stateUpdated();
     writeln("Runing daily task...");
     buzzerCommand();
 
@@ -70,18 +90,9 @@ void loop() {
     startWaterPlant(1);
     delay(1100);
     stopWaterPlant(1);
+    loopScreen();
     return;
   }
-
-  updatePlantsState();
-  loopSensors();
-  delay(500);  // почему-то без этой задержки приложение падает...
-  loopScreen();
-  delay(3000);
-  // loopPomp();
-  // loopClock();
-  // loopScreen();
-  // loopMultuplexer();
 
   if (IS_DEBUG) {
     return;

@@ -15,11 +15,10 @@ bool _sdIsInited = false;
 
 void initLogging() {
   buzzerBoot();
-  Serial.println("Ininited logging...");
   if (SD_TURNED_OFF) {
     return;
   }
-  // пробуем sdFat software spi
+  Serial.println("Start init logging...");
   SoftSpiDriver<SD_MISO_PIN, SD_MOSI_PIN, SD_SCK_PIN> softSpi;
   SdSpiConfig sd_config =
       SdSpiConfig(SD_CS_PIN, DEDICATED_SPI, SD_SCK_MHZ(0), &softSpi);
@@ -29,6 +28,7 @@ void initLogging() {
   }
 
   _sdIsInited = true;
+  global_state.sdInited = true;
   Serial.println(F("SD is inited."));
 }
 

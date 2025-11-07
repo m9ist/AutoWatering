@@ -32,29 +32,23 @@ void initSensors() {
   // работа с датчиком влажности и температуры
   wireTempSensor.begin();
   bool b = sht31.begin();
-  Serial.print("SHT31 connection: "); //todo вынести в стейт
+  Serial.print("SHT31 connection: ");  // todo вынести в стейт
   Serial.println(b);
 
-  if (true) {
-    // работа с датчиком кол-ва воды
-    pinMode(PIN_WATER_FLOW_SENSOR, INPUT);
-    uint8_t intSensor = digitalPinToInterrupt(PIN_WATER_FLOW_SENSOR);
-    attachInterrupt(intSensor, funCountInt, RISING);
-    if (intSensor < 0) {
-      Serial.println("!!!!!!!!!!!!!Указан вывод без EXT INT");
-    }
+  // работа с датчиком кол-ва воды
+  pinMode(PIN_WATER_FLOW_SENSOR, INPUT);
+  uint8_t intSensor = digitalPinToInterrupt(PIN_WATER_FLOW_SENSOR);
+  attachInterrupt(intSensor, funCountInt, RISING);
+  if (intSensor < 0) {
+    // todo добавить в ошибки
+    writeln("!!!!!!!!!!!!!Указан вывод без EXT INT");
   }
 
-  // схема с мультиплексором
-  if (true) {
-    pinMode(PIN_SERNSOR_S0, OUTPUT);  // s0
-    pinMode(PIN_SERNSOR_S1, OUTPUT);  // s1
-    pinMode(PIN_SERNSOR_S2, OUTPUT);
-    pinMode(PIN_SERNSOR_S3, OUTPUT);
-    writeln(
-        "event  ;1   ;2   ;3   ;4   ;5   ;6   ;7   ;8   ;9   ;10  ;11  ;12  "
-        ";13  ;14  ;15  ;16 ;temp;hum;  date    ;time");
-  }
+  // схема с мультиплексором для датчиков влажности почвы
+  pinMode(PIN_SERNSOR_S0, OUTPUT);  // s0
+  pinMode(PIN_SERNSOR_S1, OUTPUT);  // s1
+  pinMode(PIN_SERNSOR_S2, OUTPUT);
+  pinMode(PIN_SERNSOR_S3, OUTPUT);
 
   // 1 датчик на 1 выходе - через плату HW-080 ... 410 показания неподключенные
   // 1023- проблемы с землей 2 датчик на 4 выходе - v 1.2 3 датчик на 7 выходе -
@@ -75,74 +69,52 @@ int loopId = 0;
 
 int measure_time = 10;
 
+void loopWaterFlowSensor() {
+  //   Если прошла 1 секунда:
+  // Если c момента последнего расчёта прошла 1 секунда,
+  //  Определяем скорость и расход воды:
+  // или произошло переполнение millis то ...
+  if ((varTime + 1000) < millis() || varTime > millis()) {
+    // Сбрасываем частоту импульсов датчика, значение этой переменной
+    // приращается по прерываниям.
+    uint32_t varTmp = varF;
+    varF = 0;
+
+    // Определяем скорость потока воды мл/с.
+    // todo добавить нормировку по милисекундам
+    varQ = varTmp * 1000.0f / ((float)varTmp * 5.9f + 4570.0f);
+    // Сохраняем  время последних вычислений.
+    varTime = millis();
+    // Определяем объем воды мл.
+    varV += varQ;
+    // Выводим рассчитанные данные:
+    writeln((String) "Объем " + varV + "мл, скорость " + (varQ * 60.0f) +
+                   "мл/м.");
+  }
+}
+
+void loopSoilMoistureSensors() {
+  for (int i = 0; i < PLANTS_AMOUNT; i++) {
+    digitalWrite(PIN_SERNSOR_S0, bitRead(i, 0));
+    digitalWrite(PIN_SERNSOR_S1, bitRead(i, 1));
+    digitalWrite(PIN_SERNSOR_S2, bitRead(i, 2));
+    digitalWrite(PIN_SERNSOR_S3, bitRead(i, 3));
+    // delay(50);
+    int read = analogRead(PIN_UNPUT_SENSOR);
+    global_state.plants[i].originalValue = read;
+    global_state.plants[i].parrots =
+        constrain(map(read, 350, 950, 0, 100), 0, 99);
+  }
+}
+
 void loopSensors() {
-  if (false) {
-    sht31.read(false);
-    float temp = sht31.getTemperature();
-    float hum = sht31.getHumidity();
-    Serial.print("t = ");
-    Serial.print(temp);
-    Serial.print(", h = ");
-    Serial.println(hum);
-    delay(3000);
-  }
-  if (true) {
-    //   Если прошла 1 секунда:
-    // Если c момента последнего расчёта прошла 1 секунда,
-    //  Определяем скорость и расход воды:
-    // или произошло переполнение millis то ...
-    if ((varTime + 1000) < millis() || varTime > millis()) {
-      // Сбрасываем частоту импульсов датчика, значение этой переменной
-      // приращается по прерываниям.
-      uint32_t varTmp = varF;
-      varF = 0;
-
-      // Определяем скорость потока воды мл/с.
-      varQ = varTmp * 1000.0f / ((float)varTmp * 5.9f +
-                       4570.0f);  // todo добавить нормировку по милисекундам
-      // Сохраняем  время последних вычислений.
-      varTime = millis();
-      // Определяем объем воды мл.
-      varV += varQ;
-      //  Выводим рассчитанные данные:
-      Serial.println((String) "Объем " + varV + "мл, скорость " +
-                     (varQ * 60.0f) + "мл/м.");
-    }
-  }
-  if (true) {
-    String out = "sensors;";
-    for (int i = 0; i < 16; i++) {
-      digitalWrite(PIN_SERNSOR_S0, bitRead(i, 0));
-      digitalWrite(PIN_SERNSOR_S1, bitRead(i, 1));
-      digitalWrite(PIN_SERNSOR_S2, bitRead(i, 2));
-      digitalWrite(PIN_SERNSOR_S3, bitRead(i, 3));
-      // delay(50);
-      int read = analogRead(PIN_UNPUT_SENSOR);
-      out += read;
-      global_state.plants[i].parrots =
-          constrain(map(read, 950, 350, 0, 100), 0, 99);
-      out += ";";
-      // Serial.print(read);
-      // Serial.print(";");
-    }
-    sht31.read(false);
-    global_state.temperature = sht31.getTemperature();
-    global_state.humidity = sht31.getHumidity();
-    out += global_state.temperature;
-    out += ";";
-    out += global_state.humidity;
-    out += ";";
-    out += dateToString(getNow());
-    writeln(out);
-
-    // int data3 = analogRead(1);
-    // // map(data, 579, 0, 0, 100)
-    // String s = "Loop number;";
-    // s += loopId;
-    // s += ";s1;-1; s2;-1;s3;";
-    // s += data3;
-    // writeln(s);
-  }
+  writeln("Start loop sensors.");
+  loopWaterFlowSensor();
+  loopSoilMoistureSensors();
+  sht31.read(false);
+  global_state.temperature = sht31.getTemperature();
+  global_state.humidity = sht31.getHumidity();
+  stateUpdated();
 }
 
 /*
