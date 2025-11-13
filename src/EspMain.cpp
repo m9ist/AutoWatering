@@ -1,4 +1,5 @@
 #include <ArduinoJson.h>
+#include <ArduinoOTA.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
 #include <SettingsGyver.h>
@@ -6,7 +7,7 @@
 #include <Timer.h>
 #include <WiFiClientSecure.h>
 #include <time.h>
-#include <ArduinoOTA.h>
+#include <Communication.h>
 
 // Блок из SecretHolder, чтобы не заводить лишний .h файл, нужно там реализовать
 // эти методы
@@ -23,15 +24,16 @@ const int yandex_iot_port = 443;
 WiFiClientSecure espClient;
 String secretKey;
 
-SettingsGyver sett("My Settings");
-int slider;
-String input;
+SettingsGyver sett("Auto watering");
+sets::Logger logger(2500);
 bool updatedSettings = false;
 
 Timer timerStateSend;
 const Duration repeatIntervalStateSend = Timer::Minutes(30);
-bool stateSended = true;
+bool stateRecieved = false;
 State lastState;
+
+Communication comm = Communication(Serial, logger, true);
 
 String getTimestamp() {
   time_t now = time(nullptr);
@@ -43,24 +45,43 @@ String getTimestamp() {
   return String(buffer);
 }
 
-void serialLog(const String& command, const String& s) {
-  JsonDocument response;
-  response[command_key] = command;
-  response["timestamp"] = getTimestamp();
-  response["log"] = s;
+void sendSerial(String message) {
+  // todo inline
+  logger.println(message);
+  comm.communicationSendMessage(message);
+}
 
-  String responseJson;
-  serializeJson(response, responseJson);
-  Serial.println(responseJson);
+void serialLog(const String& command, const String& s) {
+  JsonDocument json;
+  json[command_key] = command;
+  json["timestamp"] = getTimestamp();
+  json["log"] = s;
+
+  String sendJson;
+  serializeJson(json, sendJson);
+  sendSerial(sendJson);
 }
 
 void serialLog(const String& s) { serialLog(esp_command_log, s); }
 
+void serialTimeSynced() {
+  JsonDocument json;
+  json[command_key] = esp_command_time_synced;
+  json["timestamp"] = getTimestamp();
+  time_t now = time(nullptr);
+  struct tm timeinfo;
+  gmtime_r(&now, &timeinfo);
+  serializeTimeInfo(timeinfo, json);
+  String sendJson;
+  serializeJson(json, sendJson);
+
+  sendSerial(sendJson);
+}
+
 void serialError(const String& s) { serialLog(esp_command_log, s); }
 
 void build(sets::Builder& b) {
-  b.Slider("My slider", 0, 50, 1, "ml", &slider);
-  b.Input("My input", &input);
+  b.Log(logger, "State");
   if (b.beginButtons()) {
     if (b.Button("Confirm")) {
       updatedSettings = true;
@@ -74,30 +95,6 @@ void updateSettings(sets::Updater& u) {}
 String getBearerAuthKey() {
   // если пустой или прошел час, то обновляем
   return secretKey;
-}
-
-void processCommand(String command, JsonDocument& doc) {
-  command.toLowerCase();
-  Serial.print("Processing command: ");
-  Serial.println(command);
-
-  JsonDocument response;
-  response["device_id"] = getDeviceId();
-  response["timestamp"] = getTimestamp();
-
-  if (command == "do_smth") {
-    // just do it
-    response["status"] = "success";
-    response["message"] = "Relay turned ON";
-  } else {
-    response["status"] = "error";
-    response["message"] = "Unknown command: " + command;
-  }
-
-  // Отправка ответа
-  String responseJson;
-  serializeJson(response, responseJson);
-  // mqttClient.publish(topic_events, responseJson.c_str());
 }
 
 void setupWifiClient() {
@@ -154,9 +151,7 @@ void setupOTA() {
     // NOTE: if updating FS this would be the place to unmount FS using FS.end()
     serialLog("Start updating " + type);
   });
-  ArduinoOTA.onEnd([]() {
-    serialLog("End");
-  });
+  ArduinoOTA.onEnd([]() { serialLog("End"); });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
     Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
   });
@@ -184,6 +179,8 @@ void setup() {
     Serial.begin(9600);  // для отладки
     delay(3000);
   }
+  while (!Serial) {
+  }
 
   serialLog(esp_command_start_work, "Start working");
 
@@ -202,7 +199,7 @@ void setup() {
     serialLog("Waiting for time sync...");
     delay(1000);
   }
-  serialLog("Time was synchronized");
+  serialTimeSynced();
 
   sett.begin();
   sett.onBuild(build);
@@ -251,17 +248,19 @@ void sendMessageToIOT() {
 }
 
 void processMessage(String message) {
-  serialLog(message);
+  logger.println(getTimestamp());
+  logger.println(message);
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, message);
   if (error != DeserializationError::Ok) {
     serialError((String) "Can't deserialize " + error.c_str());
+    serialLog(message);
   } else {
     const char* command = doc[command_key];
     if (strcmp(command, arduino_command_state) == 0) {
       State state = deserializeState(doc);
       lastState = state;
-      stateSended = false;
+      stateRecieved = true;
 
       if (false) {
         // в случае если нужна отладка того, что десериализовалось
@@ -269,9 +268,12 @@ void processMessage(String message) {
         String outJson;
         serializeJson(des, outJson);
         serialLog((String) "Deserialized (and serialized): " + outJson);
+      } else {
+        serialLog("Processed new state");
       }
     } else {
       serialError((String) "Unknown command " + command);
+      serialLog(message);
     }
   }
 }
@@ -279,12 +281,17 @@ void processMessage(String message) {
 void loop() {
   ArduinoOTA.handle();
 
-  if (Serial.available() > 0) {
-    String message = Serial.readStringUntil('\n');
-    message.trim();
-    processMessage(message);
+  comm.communicationTick(); //todo вынести в другой поток? <<<<<<<<<<<<<<<<<<<<<<
+  if (comm.communicationHasMessage()) {
+    processMessage(comm.communicationGetMessage());
     return;
   }
+  // if (Serial.available() > 0) {
+  //   String message = Serial.readStringUntil('\n');
+  //   message.trim();
+  //   processMessage(message);
+  //   return;
+  // }
 
   sett.tick();
 
@@ -296,24 +303,24 @@ void loop() {
 
   if (false) {
     processMessage(
-        "{\"temperature\":-45,\"humidity\":0,\"plants\":[{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":505},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":505},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":504},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":504},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":503},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":503},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":503},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":502},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":502},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":502},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":501},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":501},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":74,\"originalValue\":501},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":75,\"originalValue\":500},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":75,\"originalValue\":500},{\"isOn\":0,"
-        "\"plantName\":\"\",\"parrots\":75,\"originalValue\":500}],\"command\":"
-        "\"arduino_state_update\"}");
+        "{\"temperature\":24.08141,\"humidity\":36.35157,\"pompIsOn\":true,"
+        "\"plants\":[{\"isOn\":10,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":10,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":10,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
+        "\"originalValue\":1023}],\"command\":\"arduino_state_update\"}");
     delay(2000);
   }
 }

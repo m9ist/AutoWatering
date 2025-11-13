@@ -12,6 +12,7 @@
 #define PIN_MULTIPLEXER_PLANT_TURN_ON_SIG 18
 
 #define PIN_POMP 35
+#define PIN_POMP_TURN_ON 17
 
 bool pompState = false;
 uint32_t currentState = 0;
@@ -31,6 +32,8 @@ void initPomp() {
 
   pinMode(PIN_MULTIPLEXER_PLANT_TURN_ON_SIG, INPUT_PULLUP);
   pinMode(PIN_MULTIPLEXER_WATER_NOW_SIG, INPUT_PULLUP);
+
+  pinMode(PIN_POMP_TURN_ON, INPUT_PULLUP);
 }
 
 void multiplexPlant(int id) {
@@ -42,9 +45,19 @@ void multiplexPlant(int id) {
 
 // обновляет включено ли юзером растение на тумблере
 void updatePlantsState() {
+  bool v = digitalRead(PIN_POMP_TURN_ON) != HIGH;
+  if (v) {
+    if (!global_state.pompIsOn) {
+      global_state.pompIsOn = true;
+    }
+  } else {
+    if (global_state.pompIsOn) {
+      global_state.pompIsOn = false;
+    }
+  }
   for (int i = 0; i < PLANTS_AMOUNT; i++) {
     multiplexPlant(i);
-    bool v = digitalRead(PIN_MULTIPLEXER_PLANT_TURN_ON_SIG) != HIGH;
+    v = digitalRead(PIN_MULTIPLEXER_PLANT_TURN_ON_SIG) != HIGH;
     if (v) {
       if (global_state.plants[i].isOn == PLANT_IS_OFF_USER) {
         global_state.plants[i].isOn = PLANT_IS_ON;
@@ -101,7 +114,8 @@ void stopWaterPlant(int id) {
   out += timeCheck;
   out += "ms";
   drawScreenMessage(out);
-  delay(3000); //todo подумать как отказаться от этого, обдумать всю схему работы с экраном
+  delay(3000);  // todo подумать как отказаться от этого, обдумать всю схему
+                // работы с экраном
 }
 
 // --------- блок с клапанами
@@ -115,7 +129,7 @@ void turnOnValve(int id) {
 }
 
 void turnOffValve(int id) {
-   String out = "OFF valve";
+  String out = "OFF valve";
   out += id;
   writeln(out);
   bitWrite(currentState, patchValveId(id), LOW);

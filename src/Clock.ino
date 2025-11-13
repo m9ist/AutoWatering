@@ -21,11 +21,6 @@ Ds1302::DateTime getNow() {
   return now;
 }
 
-void stateUpdated() {
-  // todo подумать о том, чтобы сохранять источник, время, "широту обновления"
-  global_state.updated = true;
-}
-
 void initClock() {
   writeln("Init clock");
   // initialize the RTC
@@ -49,19 +44,20 @@ void initClock() {
     rtc.setDateTime(&dt);
   }
   loadNextTaskRuning();
-  if (false) {
-    Ds1302::DateTime firstAction;
-    firstAction.year = 25;
-    firstAction.month = 10;
-    firstAction.day = 3;
-    firstAction.hour = 15;
-    firstAction.minute = 0;
-    firstAction.second = 0;
-    global_state.nextTaskRuning = firstAction;
-    saveNextTaskRuning();
-  }
 
   global_state.startUpDate = getNow();
+}
+
+void setupDate(tm timeinfo) {
+  writeln("Setting time...");
+  Ds1302::DateTime dt = {.year = timeinfo.tm_year - 100,
+                         .month = 1 + timeinfo.tm_mon,
+                         .day = timeinfo.tm_mday,
+                         .hour = timeinfo.tm_hour,
+                         .minute = timeinfo.tm_min,
+                         .second = timeinfo.tm_sec};
+
+  rtc.setDateTime(&dt);
 }
 
 void saveNextTaskRuning() {

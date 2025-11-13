@@ -84,6 +84,13 @@ void loopScreen() {
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
   lcd.println(dateToString(getNow()));
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
+  lcd.print((int)global_state.temperature);
+  lcd.print((char)223);
+  lcd.print(" ");
+  lcd.print((int)global_state.humidity);
+  lcd.println("%");
+
+  lcd.setCursor(stepx, stepy + lineHeight * lineId++);
   lcd.println("Next task runing");
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
   lcd.println(dateToString(global_state.nextTaskRuning));
@@ -109,8 +116,11 @@ void loopScreen() {
   lcd.print("SD");
   lcd.setTextColor(getFont(state), getBackground(state));
   lcd.print(" ");
-  // lcd.setTextColor(getFont(false), getBackground(false));
-  // lcd.print("SD");
+  lcd.setTextColor(getFont(global_state.pompIsOn),
+                   getBackground(global_state.pompIsOn));
+  lcd.print("pomp");
+  lcd.setTextColor(getFont(state), getBackground(state));
+  lcd.print(" ");
 }
 
 bool isCheckButtonPressed() {

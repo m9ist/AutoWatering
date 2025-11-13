@@ -103,7 +103,7 @@ void loopSoilMoistureSensors() {
     int read = analogRead(PIN_UNPUT_SENSOR);
     global_state.plants[i].originalValue = read;
     global_state.plants[i].parrots =
-        constrain(map(read, 350, 950, 0, 100), 0, 99);
+        constrain(map(read, 950, 350, 0, 100), 0, 99);
   }
 }
 
