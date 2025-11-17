@@ -7,22 +7,17 @@
 #define PLANTS_AMOUNT 16
 #define DATA_CHUNK_SIZE 62  // SERIAL_TX_BUFFER_SIZE
 
-const char* command_key = "command";
-
-const char* esp_command_log = "esp_log";
-const char* esp_command_start_work = "esp_start_working";
-const char* esp_command_connect_wifi = "esp_wait_wifi";
-const char* esp_command_inited = "esp_inited";
-const char* esp_command_time_synced = "esp_ntp_synchronized";
-
-const char* arduino_command_state = "arduino_state_update";
+#define COMMAND_KEY F("command")
+#define ESP_COMMAND_LOG F("esp_log")
+#define ESP_COMMAND_TIME_SYNCED F("esp_ntp_synchronized")
+#define ARDUINO_COMMAND_STATE "arduino_state_update"
 
 struct Plant {
   // включено ли растение PLANT_IS_OFF_USER - выключен тумблер ??? - отключение
   // по ошибке PLANT_IS_ON - включено
-  int isOn;
+  int isOn = false;
   // краткое описание растения (горшок, название и тд)
-  String plantName;
+  String plantName = "";
   // сколько в процентах влажности 0..99
   int parrots;
   // оригинальная влажность от датчика влажности
@@ -36,6 +31,8 @@ struct State {
   bool updated = false;
 
   bool sdInited = false;
+  bool pompIsOn = false;
+  bool espConnectedAndTimeSynced = false;
 
   Plant plants[PLANTS_AMOUNT];
 
@@ -57,8 +54,6 @@ struct State {
   int sendIotFrequencyInMinutes = 60;
   // Время последней синхронизации часов
   // Список критических ошибок
-
-  bool pompIsOn = false;
 };
 
 String dateToString(Ds1302::DateTime now) {
@@ -84,13 +79,19 @@ String dateToString(Ds1302::DateTime now) {
   return out;
 }
 
+bool isDefined(Plant plant) {
+  return plant.isOn || plant.originalValue < 1020 || plant.plantName != "";
+}
+
 JsonDocument serializeState(State state) {
   JsonDocument out;
-  out[command_key] = arduino_command_state;
+  out[COMMAND_KEY] = ARDUINO_COMMAND_STATE;
   out[F("t")] = state.temperature;
   out[F("h")] = state.humidity;
 
   for (int i = 0; i < PLANTS_AMOUNT; i++) {
+    if (!isDefined(state.plants[i])) continue;
+    out[F("p")][i][F("id")] = i;
     out[F("p")][i][F("on")] = state.plants[i].isOn;
     out[F("p")][i][F("d")] = state.plants[i].plantName;
     out[F("p")][i][F("p")] = state.plants[i].parrots;
@@ -105,12 +106,13 @@ State deserializeState(JsonDocument doc) {
   out.temperature = doc[F("t")];
   out.humidity = doc[F("h")];
 
-  for (int i = 0; i < PLANTS_AMOUNT; i++) {
-    out.plants[i].isOn = doc[F("p")][i][F("on")];
+  for (size_t i = 0; i < doc[F("p")].size(); i++) {
+    int id = doc[F("p")][i][F("id")];
+    out.plants[id].isOn = doc[F("p")][i][F("on")];
     const char* plantName = doc[F("p")][i][F("d")];
-    out.plants[i].plantName = plantName;
-    out.plants[i].parrots = doc[F("p")][i][F("p")];
-    out.plants[i].originalValue = doc[F("p")][i][F("or")];
+    out.plants[id].plantName = plantName;
+    out.plants[id].parrots = doc[F("p")][i][F("p")];
+    out.plants[id].originalValue = doc[F("p")][i][F("or")];
   }
 
   return out;

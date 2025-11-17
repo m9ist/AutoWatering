@@ -1,13 +1,20 @@
+// 3 дня раз для замеров раз в repeatIntervalStateSend
+#define NUM_PLOT_POINTS 6
+#define TURN_ON_TELEGRAM
+
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
+#include <Communication.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
 #include <SettingsGyver.h>
 #include <State.h>
 #include <Timer.h>
+#ifdef TURN_ON_TELEGRAM
+#include <UniversalTelegramBot.h>
+#endif
 #include <WiFiClientSecure.h>
 #include <time.h>
-#include <Communication.h>
 
 // Блок из SecretHolder, чтобы не заводить лишний .h файл, нужно там реализовать
 // эти методы
@@ -16,6 +23,7 @@ String wifiPasswork();
 String publicCert();
 String privateCert();
 String getDeviceId();
+String getTelegramBotToken();
 
 // Настройки Яндекс IoT
 const char* yandex_iot_endpoint = "iot-data.api.cloud.yandex.net";
@@ -23,15 +31,28 @@ const int yandex_iot_port = 443;
 
 WiFiClientSecure espClient;
 String secretKey;
+#ifdef TURN_ON_TELEGRAM
+UniversalTelegramBot telegramBot(getTelegramBotToken(), espClient);
+#endif
+String telegramChatId = "817406967";
+Timer timerTelegramCheck;
+const Duration repeatTelegramCheck = Timer::Minutes(1);
 
 SettingsGyver sett("Auto watering");
 sets::Logger logger(2500);
 bool updatedSettings = false;
 
 Timer timerStateSend;
-const Duration repeatIntervalStateSend = Timer::Minutes(30);
+const Duration repeatIntervalStateSend = Timer::Minutes(1);
 bool stateRecieved = false;
 State lastState;
+
+struct PlotPoint {
+  uint32_t time;
+  unsigned char pp[PLANTS_AMOUNT];
+};
+int numPlotPoints = 0;
+PlotPoint lastPlotPoints[NUM_PLOT_POINTS];
 
 Communication comm = Communication(Serial, logger, true);
 
@@ -45,43 +66,50 @@ String getTimestamp() {
   return String(buffer);
 }
 
-void sendSerial(String message) {
-  // todo inline
-  logger.println(message);
-  comm.communicationSendMessage(message);
-}
-
 void serialLog(const String& command, const String& s) {
   JsonDocument json;
-  json[command_key] = command;
-  json["timestamp"] = getTimestamp();
-  json["log"] = s;
+  json[COMMAND_KEY] = command;
+  json[F("timestamp")] = getTimestamp();
+  json[F("log")] = s;
 
   String sendJson;
   serializeJson(json, sendJson);
-  sendSerial(sendJson);
+  logger.println(sendJson);
+  comm.communicationSendMessage(sendJson);
 }
 
-void serialLog(const String& s) { serialLog(esp_command_log, s); }
+void serialLog(const String& s) { serialLog(ESP_COMMAND_LOG, s); }
 
 void serialTimeSynced() {
   JsonDocument json;
-  json[command_key] = esp_command_time_synced;
-  json["timestamp"] = getTimestamp();
+  json[COMMAND_KEY] = ESP_COMMAND_TIME_SYNCED;
+  json[F("timestamp")] = getTimestamp();
   time_t now = time(nullptr);
   struct tm timeinfo;
   gmtime_r(&now, &timeinfo);
   serializeTimeInfo(timeinfo, json);
   String sendJson;
   serializeJson(json, sendJson);
-
-  sendSerial(sendJson);
+  logger.println(sendJson);
+  comm.communicationSendMessage(sendJson);
 }
 
-void serialError(const String& s) { serialLog(esp_command_log, s); }
+void serialError(const String& s) { serialLog(ESP_COMMAND_LOG, s); }
+
+void logTelegram(String message) {
+  if (telegramChatId == "") return;
+
+#ifdef TURN_ON_TELEGRAM
+  telegramBot.sendMessage(telegramChatId, getTimestamp() + F(": ") + message,
+                          "");
+  serialLog((String)F("Send telegram: ") + message);
+#endif
+}
 
 void build(sets::Builder& b) {
   b.Log(logger, "State");
+  b.PlotStack(H(run), "p0;p1;p2;p3;p4;p5;p6;p7;p8;p9;p10;p11;p12;p13;p14;p15");
+  if (PLANTS_AMOUNT != 16) serialError("Plants amount not 16!");
   if (b.beginButtons()) {
     if (b.Button("Confirm")) {
       updatedSettings = true;
@@ -90,7 +118,25 @@ void build(sets::Builder& b) {
   }
 }
 
-void updateSettings(sets::Updater& u) {}
+void updateSettings(sets::Updater& u) {
+  if (PLANTS_AMOUNT != 16) serialError(F("Plants amount not 16!"));
+  Table t(0, 16, cell_t::Uint32, cell_t::Int8, cell_t::Int8, cell_t::Int8,
+          cell_t::Int8, cell_t::Int8, cell_t::Int8, cell_t::Int8, cell_t::Int8,
+          cell_t::Int8, cell_t::Int8, cell_t::Int8, cell_t::Int8, cell_t::Int8,
+          cell_t::Int8, cell_t::Int8, cell_t::Int8);
+  for (int i = 0; i < numPlotPoints; i++) {
+    t.append(lastPlotPoints[i].time, lastPlotPoints[i].pp[0],
+             lastPlotPoints[i].pp[1], lastPlotPoints[i].pp[2],
+             lastPlotPoints[i].pp[3], lastPlotPoints[i].pp[4],
+             lastPlotPoints[i].pp[5], lastPlotPoints[i].pp[6],
+             lastPlotPoints[i].pp[7], lastPlotPoints[i].pp[8],
+             lastPlotPoints[i].pp[9], lastPlotPoints[i].pp[10],
+             lastPlotPoints[i].pp[11], lastPlotPoints[i].pp[12],
+             lastPlotPoints[i].pp[13], lastPlotPoints[i].pp[14],
+             lastPlotPoints[i].pp[15]);
+  }
+  u.updatePlot(H(run), t);
+}
 
 String getBearerAuthKey() {
   // если пустой или прошел час, то обновляем
@@ -99,7 +145,7 @@ String getBearerAuthKey() {
 
 void setupWifiClient() {
   // Настройка безопасного соединения
-  serialLog("Setup secure wifi...");
+  serialLog(F("Setup secure wifi..."));
   // BearSSL::X509List xYa(ya_sert);
   // espClient.setTrustAnchors(&xYa);
   espClient.setInsecure();
@@ -107,12 +153,12 @@ void setupWifiClient() {
   BearSSL::PrivateKey* privKey = new BearSSL::PrivateKey(privateCert().c_str());
   espClient.setClientRSACert(&x509, privKey);
 
-  serialLog("Check connection...");
+  serialLog(F("Check connection..."));
   if (!espClient.connect(yandex_iot_endpoint, yandex_iot_port)) {
-    serialLog("Connection to iot failed. error = " +
+    serialLog((String)F("Connection to iot failed. error = ") +
               espClient.getLastSSLError());
   } else {
-    serialLog("Connection to iot is tested.");
+    serialLog(F("Connection to iot is tested."));
   }
 }
 
@@ -125,17 +171,17 @@ void checkWifi() {
 
   int i = 0;
   while (WiFi.status() != WL_CONNECTED) {  // Ожидаем подключения к Wi-Fi
-    serialLog(esp_command_connect_wifi, "Waiting wi-fi");
+    serialLog(F("Waiting wi-fi"));
     delay(1000);
     i++;
     if (i > 15) {
-      serialLog("Unable to connect wifi, restart.");
+      serialLog(F("Unable to connect wifi, restart."));
       ESP.restart();
     }
   }
 
   // Выводим информацию о подключении
-  serialLog(esp_command_inited, "Connected to " + ssid());
+  serialLog(F("Connected to ") + ssid());
   serialLog(WiFi.localIP().toString());
 }
 
@@ -143,33 +189,55 @@ void setupOTA() {
   ArduinoOTA.onStart([]() {
     String type;
     if (ArduinoOTA.getCommand() == U_FLASH) {
-      type = "sketch";
+      type = F("sketch");
     } else {  // U_FS
-      type = "filesystem";
+      type = F("filesystem");
     }
 
     // NOTE: if updating FS this would be the place to unmount FS using FS.end()
-    serialLog("Start updating " + type);
+    serialLog(F("Start updating ") + type);
   });
-  ArduinoOTA.onEnd([]() { serialLog("End"); });
+  ArduinoOTA.onEnd([]() { serialLog(F("End")); });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
     Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
   });
   ArduinoOTA.onError([](ota_error_t error) {
     Serial.printf("Error[%u]: ", error);
     if (error == OTA_AUTH_ERROR) {
-      Serial.println("Auth Failed");
+      Serial.println(F("Auth Failed"));
     } else if (error == OTA_BEGIN_ERROR) {
-      Serial.println("Begin Failed");
+      Serial.println(F("Begin Failed"));
     } else if (error == OTA_CONNECT_ERROR) {
-      Serial.println("Connect Failed");
+      Serial.println(F("Connect Failed"));
     } else if (error == OTA_RECEIVE_ERROR) {
-      Serial.println("Receive Failed");
+      Serial.println(F("Receive Failed"));
     } else if (error == OTA_END_ERROR) {
-      Serial.println("End Failed");
+      Serial.println(F("End Failed"));
     }
   });
   ArduinoOTA.begin();
+}
+
+void loopTelegram() {
+  if (!timerTelegramCheck.expired()) return;
+  timerTelegramCheck.setDuration(repeatTelegramCheck);
+
+#ifdef TURN_ON_TELEGRAM
+  int numNewMessages =
+      telegramBot.getUpdates(telegramBot.last_message_received + 1);
+  if (numNewMessages == 0) return;
+  serialLog(F("Telegram start communication!"));
+  for (int i = 0; i < numNewMessages; i++) {
+    String chatId = telegramBot.messages[i].chat_id;
+    if (telegramChatId != chatId) {
+      serialLog(F("Got new chatid ") + chatId);
+      telegramChatId = chatId;
+    }
+    String message = telegramBot.messages[i].text;
+    serialLog((String)F("Got message from telegram: ") + message);
+  }
+  logTelegram(F("Got it"));
+#endif
 }
 
 void setup() {
@@ -182,7 +250,7 @@ void setup() {
   while (!Serial) {
   }
 
-  serialLog(esp_command_start_work, "Start working");
+  serialLog("Start working");
 
   // Устанавливаем Wi-Fi модуль в режим клиента (STA)
   WiFi.mode(WIFI_STA);
@@ -190,60 +258,64 @@ void setup() {
   WiFi.begin(ssid(), wifiPasswork());
   checkWifi();
   setupOTA();
-  // setupWifiClient();
 
-  serialLog("Start sync time");
-  configTime("UTC+3", "ntp6.ntp-servers.net	", "1.ru.pool.ntp.org",
-             "ntp.ix.ru");
+  serialLog(F("Start sync time"));
+  configTime("UTC+3", F("ntp6.ntp-servers.net	"), F("1.ru.pool.ntp.org"),
+             F("ntp.ix.ru"));
   while (!isTimeInited()) {
-    serialLog("Waiting for time sync...");
+    serialLog(F("Waiting for time sync..."));
     delay(1000);
   }
   serialTimeSynced();
+
+  setupWifiClient();
 
   sett.begin();
   sett.onBuild(build);
   sett.onUpdate(updateSettings);
 
   timerStateSend.setDuration(repeatIntervalStateSend);
+  timerTelegramCheck.setDuration(repeatTelegramCheck);
+  logTelegram(F("Hellow world"));
 }
 
 void sendMessageToIOT() {
-  serialLog("Start sending message...");
+  serialLog(F("Start sending message..."));
   if (true) {
-    serialLog("Communication with iot is turned off, exit.");
+    serialLog(F("Communication with iot is turned off, exit."));
     return;
   }
   HTTPClient https;
-  String url = "https://";
+  String url = F("https://");
   url += yandex_iot_endpoint;
-  url += "/iot-devices/v1/devices/";
+  url += F("/iot-devices/v1/devices/");
   url += getDeviceId();
-  url += "/publish";
+  url += F("/publish");
   https.begin(espClient, url);
 
-  https.addHeader("Content-Type", "application/json");
-  https.addHeader("Connection", "close");
-  https.addHeader("Authorization", "Bearer " + getBearerAuthKey());
+  https.addHeader(F("Content-Type"), F("application/json"));
+  https.addHeader(F("Connection"), F("close"));
+  https.addHeader(F("Authorization"),
+                  (String)F("Bearer ") + getBearerAuthKey());
 
   JsonDocument subDoc;
-  subDoc["timestamp"] = getTimestamp();
-  subDoc["ip_address"] = WiFi.localIP().toString();
-  subDoc["rssi"] = WiFi.RSSI();
+  subDoc[F("timestamp")] = getTimestamp();
+  subDoc[F("ip_address")] = WiFi.localIP().toString();
+  subDoc[F("rssi")] = WiFi.RSSI();
 
   JsonDocument doc;
-  doc["topic"] = "events";
+  doc[F("topic")] = "events";
   // doc["data"] = 1;
-  doc["data"] = "test";
+  doc[F("data")] = "test";
 
   String json;
   serializeJson(doc, json);
 
-  serialLog("post: " + json);
+  serialLog(F("post: ") + json);
   int httpCode = https.POST(json);
-  serialLog("got result " + httpCode);
+  serialLog((String)F("got result ") + httpCode);
   String response = https.getString();
-  serialLog("Response: " + response);
+  serialLog(F("Response: ") + response);
   https.end();
 }
 
@@ -253,11 +325,11 @@ void processMessage(String message) {
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, message);
   if (error != DeserializationError::Ok) {
-    serialError((String) "Can't deserialize " + error.c_str());
+    serialError((String)F("Can't deserialize ") + error.c_str());
     serialLog(message);
   } else {
-    const char* command = doc[command_key];
-    if (strcmp(command, arduino_command_state) == 0) {
+    const char* command = doc[COMMAND_KEY];
+    if ((String)ARDUINO_COMMAND_STATE == command) {
       State state = deserializeState(doc);
       lastState = state;
       stateRecieved = true;
@@ -267,12 +339,12 @@ void processMessage(String message) {
         JsonDocument des = serializeState(state);
         String outJson;
         serializeJson(des, outJson);
-        serialLog((String) "Deserialized (and serialized): " + outJson);
+        serialLog((String)F("Deserialized (and serialized): ") + outJson);
       } else {
-        serialLog("Processed new state");
+        serialLog(F("Processed new state"));
       }
     } else {
-      serialError((String) "Unknown command " + command);
+      serialError((String)F("Unknown command ") + command);
       serialLog(message);
     }
   }
@@ -280,47 +352,35 @@ void processMessage(String message) {
 
 void loop() {
   ArduinoOTA.handle();
-
-  comm.communicationTick(); //todo вынести в другой поток? <<<<<<<<<<<<<<<<<<<<<<
+  // todo вынести в другой поток? <<<<<<<<<<<<<<<<<<<<<<
+  comm.communicationTick();
   if (comm.communicationHasMessage()) {
     processMessage(comm.communicationGetMessage());
     return;
   }
-  // if (Serial.available() > 0) {
-  //   String message = Serial.readStringUntil('\n');
-  //   message.trim();
-  //   processMessage(message);
-  //   return;
-  // }
 
   sett.tick();
+  loopTelegram();
 
-  if (timerStateSend.expired()) {
+  if (timerStateSend.expired() && stateRecieved) {
+    stateRecieved = false;
+
+    PlotPoint point;
+    point.time = sett.rtc.getUnix();
+    for (int i = 0; i < PLANTS_AMOUNT; i++) {
+      point.pp[i] = lastState.plants[i].parrots;
+    }
+    if (numPlotPoints == NUM_PLOT_POINTS) {
+      for (int i = 0; i < NUM_PLOT_POINTS - 1; i++) {
+        lastPlotPoints[i] = lastPlotPoints[i + 1];
+      }
+      numPlotPoints--;
+    }
+    lastPlotPoints[numPlotPoints] = point;
+    numPlotPoints++;
+
     timerStateSend.setDuration(repeatIntervalStateSend);
     sendMessageToIOT();
     return;
-  }
-
-  if (false) {
-    processMessage(
-        "{\"temperature\":24.08141,\"humidity\":36.35157,\"pompIsOn\":true,"
-        "\"plants\":[{\"isOn\":10,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":10,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":10,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023},{\"isOn\":0,\"plantName\":\"\",\"parrots\":0,"
-        "\"originalValue\":1023}],\"command\":\"arduino_state_update\"}");
-    delay(2000);
   }
 }

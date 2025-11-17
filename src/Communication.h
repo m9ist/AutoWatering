@@ -26,7 +26,7 @@ class Communication {
 #define COMMUNICATION_NEXT "next\n"
 #define COMMUNICATION_END "end\n"
 #define COMMUNICATION_HELLOW "hellow world!\n"
-#define DATA_CHUNK_SIZE 62  // SERIAL_TX_BUFFER_SIZE
+#define COMMUNICATION_DATA_CHUNK_SIZE 62  // SERIAL_TX_BUFFER_SIZE
 
   int state = STATE_INIT;
   // если нужно закинуть в очередь сообщение, мы увеличиваем queueSize и

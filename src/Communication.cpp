@@ -208,8 +208,8 @@ void Communication::communicationTick() {
     while (nextMessagePartStart < message.length()) {
       String chunk = message.substring(
           nextMessagePartStart,
-          min(message.length(), nextMessagePartStart + DATA_CHUNK_SIZE));
-      nextMessagePartStart += DATA_CHUNK_SIZE;
+          min(message.length(), nextMessagePartStart + COMMUNICATION_DATA_CHUNK_SIZE));
+      nextMessagePartStart += COMMUNICATION_DATA_CHUNK_SIZE;
       printChunk(chunk);
       ret = readNextChunk();
       if (timeOut(ret)) return;

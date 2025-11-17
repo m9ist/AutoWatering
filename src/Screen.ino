@@ -121,6 +121,11 @@ void loopScreen() {
   lcd.print("pomp");
   lcd.setTextColor(getFont(state), getBackground(state));
   lcd.print(" ");
+  lcd.setTextColor(getFont(global_state.espConnectedAndTimeSynced),
+                   getBackground(global_state.espConnectedAndTimeSynced));
+  lcd.print("esp");
+  lcd.setTextColor(getFont(state), getBackground(state));
+  lcd.print(" ");
 }
 
 bool isCheckButtonPressed() {

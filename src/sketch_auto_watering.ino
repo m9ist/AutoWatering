@@ -51,16 +51,6 @@ void setup() {
 
 uint32_t test_time = 0;
 
-void sendSerial(String message) {
-  // if (message.length() == 0) {
-  //   writeln(F("Got empty message to send. Exit."));
-  //   return;
-  // }
-  // todo inline
-  // sendSerial(message, Serial3);
-  
-}
-
 void loop() {
   // сначала делаем дешевые операции, все дорогие делаем в конце функции
   comm.communicationTick();
@@ -75,18 +65,14 @@ void loop() {
     if (error != DeserializationError::Ok) {
       writeln((String)F("Can't deserialize ") + error.c_str());
     } else {
-      const char* command = doc[command_key];
-      if (strcmp(command, esp_command_log) == 0) {
+      const char* command = doc[COMMAND_KEY];
+      if ((String)ESP_COMMAND_LOG == command) {
         // уже залогировали, ничего не делаем
-      } else if (strcmp(command, esp_command_connect_wifi) == 0) {
-        // todo
-      } else if (strcmp(command, esp_command_start_work) == 0) {
-        // todo
-      } else if (strcmp(command, esp_command_inited) == 0) {
-        // todo
-      } else if (strcmp(command, esp_command_time_synced) == 0) {
+      } else if ((String)ESP_COMMAND_TIME_SYNCED == command) {
         tm timeinfo = deserializeTimeInfo(doc);
         setupDate(timeinfo);
+        global_state.espConnectedAndTimeSynced = true;
+        loopScreen();
       } else {
         writeln((String)F("Unknown command ") + command);
       }
