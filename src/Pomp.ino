@@ -44,7 +44,7 @@ void multiplexPlant(int id) {
 }
 
 // обновляет включено ли юзером растение на тумблере
-void updatePlantsState() {
+void updatePlantsState(bool needStateUpdate) {
   bool v = digitalRead(PIN_POMP_TURN_ON) != HIGH;
   if (v) {
     if (!global_state.pompIsOn) {
@@ -55,21 +55,24 @@ void updatePlantsState() {
       global_state.pompIsOn = false;
     }
   }
+  bool wasUpdate = false;
   for (int i = 0; i < PLANTS_AMOUNT; i++) {
     multiplexPlant(i);
     v = digitalRead(PIN_MULTIPLEXER_PLANT_TURN_ON_SIG) != HIGH;
     if (v) {
-      if (global_state.plants[i].isOn == PLANT_IS_OFF_USER) {
+      if (global_state.plants[i].isOn == PLANT_IS_OFF_USER ||
+          global_state.plants[i].isOn == PLANT_IS_UNDEFINED) {
         global_state.plants[i].isOn = PLANT_IS_ON;
-        stateUpdated();
+        wasUpdate = true;
       }
     } else {
       if (global_state.plants[i].isOn == PLANT_IS_ON) {
         global_state.plants[i].isOn = PLANT_IS_OFF_USER;
-        stateUpdated();
+        wasUpdate = true;
       }
     }
   }
+  if (wasUpdate && needStateUpdate) stateUpdated();
 }
 
 bool isWaterNowButtonPressed(int id) {
@@ -82,12 +85,12 @@ bool isWaterNowButtonPressed(int id) {
 //---------- блок с помпой
 
 void startPomp() {
-  writeln("Start pomp");
+  writeln(F("Start pomp"));
   digitalWrite(PIN_POMP, HIGH);
 }
 
 void stopPomp() {
-  writeln("Stop pomp");
+  writeln(F("Stop pomp"));
   digitalWrite(PIN_POMP, LOW);
 }
 
@@ -103,25 +106,26 @@ void startWaterPlant(int id) {
   startPomp();
 }
 
-void stopWaterPlant(int id) {
+//*
+String stopWaterPlant(int id) {
   stopPomp();
   turnOffValve(id);
 
   timeCheck = millis() - timeCheck;
-  String out = "End watering plant ";
-  out += id;
-  out += " in ";
-  out += timeCheck;
-  out += "ms";
-  drawScreenMessage(out);
-  delay(3000);  // todo подумать как отказаться от этого, обдумать всю схему
-                // работы с экраном
+  String out = (String) F("End watering plant ") + id + F(" in ") + timeCheck + F("ms");
+  return out;
 }
+
+String waterPlant(int id, int amounMl) {
+  return (String) F("Done task water plant ") + id + F(" with ") + amounMl +
+         F("ml. Did nothing!!!");
+}
+//*/
 
 // --------- блок с клапанами
 
 void turnOnValve(int id) {
-  String out = "ON valve";
+  String out = F("ON valve");
   out += id;
   writeln(out);
   bitWrite(currentState, patchValveId(id), HIGH);
@@ -129,7 +133,7 @@ void turnOnValve(int id) {
 }
 
 void turnOffValve(int id) {
-  String out = "OFF valve";
+  String out = F("OFF valve");
   out += id;
   writeln(out);
   bitWrite(currentState, patchValveId(id), LOW);

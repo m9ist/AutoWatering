@@ -44,9 +44,11 @@ void setup() {
   initScreen();
 
   initSensors();
+  updatePlantsState(false);
   initPomp();
 
   timerSensorsCheck.setDuration(Timer::Seconds(5));
+  writeln(F("End init arduino"));
 }
 
 uint32_t test_time = 0;
@@ -72,7 +74,20 @@ void loop() {
         tm timeinfo = deserializeTimeInfo(doc);
         setupDate(timeinfo);
         global_state.espConnectedAndTimeSynced = true;
-        loopScreen();
+        loopScreen(); //*
+       } else if ((String)ESP_COMMAND_WATER_PLANT == command) {
+        //*
+         int id = doc[F("plantId")];
+         int amount = doc[F("amountMl")];
+         String info = (String)F("Did nothing with ") + id + " " + amount;//waterPlant(id, amount); //<<<<<<<<<<<<<
+         JsonDocument toSend;
+         toSend[COMMAND_KEY] = ARDUINO_SEND_TELEGRAM;
+         toSend[F("message")] = (String) F("Arduino: ") + info;
+         String out;
+         serializeJson(toSend, out);
+         writeln(out);
+         comm.communicationSendMessage(out);
+         //*/
       } else {
         writeln((String)F("Unknown command ") + command);
       }
@@ -95,20 +110,28 @@ void loop() {
     return;
   }
 
+  /* 
   for (int i = 0; i < 16; i++) {
     if (isWaterNowButtonPressed(i)) {
+      // drawScreenMessage((String)F("Start water plant ") + i);//todo <<<<<<<<<<<<<<<<<<<< победить фигню
       startWaterPlant(i);
 
       while (isWaterNowButtonPressed(i)) {
       }
 
-      stopWaterPlant(i);
+      String info = stopWaterPlant(i);
+      // drawScreenMessage(info); //todo <<<<<<<<<<<<<<<<<<<< победить фигню
+      // todo <<<<<< подумать как отказаться от этого, обдумать всю схему работы
+      // с экраном
+      delay(3000);
+
       loopScreen();
       return;
     }
   }
+  //*/
 
-  updatePlantsState();
+  updatePlantsState(true);
 
   if (timerSensorsCheck.expired()) {
     timerSensorsCheck.setDuration(repeatIntervalSensorsCheck);
@@ -120,6 +143,7 @@ void loop() {
     return;
   }
 
+  /*
   if (runNextDayTask()) {  // todo проверка на корректность времени
     writeln(F("Runing daily task..."));
     buzzerCommand();
@@ -136,37 +160,5 @@ void loop() {
     loopScreen();
     return;
   }
-
-  if (IS_DEBUG) {
-    return;
-  }
-
-  // главная мысль, если нужно выполнить команду, сразу ее сделать, а потом
-  // запустить алгоритм заново сначала нужно вытащить команду от Алисы и
-  // выполнить ее потом проверить стейт потом поливать потом послать данные
-  // Алисе потом уже синхронизация времени
-
-  writeln(F("--->>> start main cycle"));
-
-  // проверить надо ли обновлять стейт, сделать обновление
-
-  // нарисовать экран по изменению стейта
-
-  // послать оповещения пользователям
-  // послать стейт алисе
-
-  // учесть резкие изменения стейта?
-  // пройтись по стейту - нужно ли поливать, сделать поливку
-  // сначала обновить стейт, полить, обновить стейт
-
-  // слушаем кнопку принудительного полива - короткое нажание - проверка,
-  // длительное - поливка алгоритмом через пик, длинная задержка -
-  // принудительная проливка
-
-  // получаем команду от алисы (с фильтрацией дублей) - отображение на экране
-  // ---busy---, отослать статус "начали выполнять" и "выполнили"
+  //*/
 }
-
-// void waterPlant(Plant plant) {}
-
-// bool checkAlisa() {}

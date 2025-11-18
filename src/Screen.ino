@@ -55,7 +55,7 @@ String lastMessage;
 
 void drawScreenMessage(String message) {
   if (lastMessage == message) return;
-  Serial.println(message);
+  writeln(message);
   lastMessage = message;
 
   lcd.fillScreen(YELLOW);

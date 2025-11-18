@@ -3,25 +3,30 @@
 #include <Time.h>
 
 #define PLANT_IS_ON 10
-#define PLANT_IS_OFF_USER 0
+#define PLANT_IS_OFF_USER 1
+#define PLANT_IS_OFF_EXCEPTION 2
+#define PLANT_IS_UNDEFINED -1
 #define PLANTS_AMOUNT 16
 #define DATA_CHUNK_SIZE 62  // SERIAL_TX_BUFFER_SIZE
+#define UNDEFINED_PLANT_VALUE 1022
 
 #define COMMAND_KEY F("command")
 #define ESP_COMMAND_LOG F("esp_log")
 #define ESP_COMMAND_TIME_SYNCED F("esp_ntp_synchronized")
-#define ARDUINO_COMMAND_STATE "arduino_state_update"
+#define ARDUINO_COMMAND_STATE F("arduino_state_update")
+#define ESP_COMMAND_WATER_PLANT F("esp_water_plant")
+#define ARDUINO_SEND_TELEGRAM F("arduino_telegram")
 
 struct Plant {
   // включено ли растение PLANT_IS_OFF_USER - выключен тумблер ??? - отключение
   // по ошибке PLANT_IS_ON - включено
-  int isOn = false;
+  int isOn = PLANT_IS_UNDEFINED;
   // краткое описание растения (горшок, название и тд)
   String plantName = "";
   // сколько в процентах влажности 0..99
-  int parrots;
+  int parrots = 0;
   // оригинальная влажность от датчика влажности
-  int originalValue;
+  int originalValue = UNDEFINED_PLANT_VALUE;
   // частота полива в часах
   // баунд принудительной поливки
 };
@@ -80,7 +85,9 @@ String dateToString(Ds1302::DateTime now) {
 }
 
 bool isDefined(Plant plant) {
-  return plant.isOn || plant.originalValue < 1020 || plant.plantName != "";
+  // todo <<<<<< когда будут ошибки учесть их
+  return plant.isOn == PLANT_IS_ON || plant.originalValue < UNDEFINED_PLANT_VALUE ||
+         plant.plantName != "";
 }
 
 JsonDocument serializeState(State state) {

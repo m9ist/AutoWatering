@@ -1,4 +1,4 @@
-// 3 дня раз для замеров раз в repeatIntervalStateSend
+// 3 дня раз для замеров раз в repeatIntervalStateSendIot
 #define NUM_PLOT_POINTS 6
 #define TURN_ON_TELEGRAM
 
@@ -36,15 +36,20 @@ UniversalTelegramBot telegramBot(getTelegramBotToken(), espClient);
 #endif
 String telegramChatId = "817406967";
 Timer timerTelegramCheck;
-const Duration repeatTelegramCheck = Timer::Minutes(1);
+const Duration repeatTelegramCheck = Timer::Seconds(10);
 
 SettingsGyver sett("Auto watering");
 sets::Logger logger(2500);
 bool updatedSettings = false;
 
-Timer timerStateSend;
-const Duration repeatIntervalStateSend = Timer::Minutes(1);
-bool stateRecieved = false;
+Timer timerStateSendIot;
+const Duration repeatIntervalStateSendIot = Timer::Minutes(30);
+bool stateRecievedIot = false;
+Timer timerStateSendTelegram;
+const Duration repeatIntervalStateSendTelegram = Timer::Hours(2);
+bool stateRecievedTelegram = false;
+
+// полученный из ардуино стейт
 State lastState;
 
 struct PlotPoint {
@@ -79,6 +84,19 @@ void serialLog(const String& command, const String& s) {
 }
 
 void serialLog(const String& s) { serialLog(ESP_COMMAND_LOG, s); }
+
+void serialCommandWater(int id, int amount) {
+  JsonDocument json;
+  json[COMMAND_KEY] = ESP_COMMAND_WATER_PLANT;
+  json[F("timestamp")] = getTimestamp();
+  json[F("plantId")] = id;
+  json[F("amountMl")] = amount;
+
+  String sendJson;
+  serializeJson(json, sendJson);
+  logger.println(sendJson);
+  comm.communicationSendMessage(sendJson);
+}
 
 void serialTimeSynced() {
   JsonDocument json;
@@ -218,6 +236,50 @@ void setupOTA() {
   ArduinoOTA.begin();
 }
 
+bool isValidInteger(String str) {
+  if (str.length() == 0) return false;
+  for (int i = 0; i < str.length(); i++) {
+    if (!isDigit(str.charAt(i))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void procesTelegramMessage(String message) {
+  if (message == F("/state")) {
+    timerStateSendTelegram.setDuration(Timer::Seconds(1));
+    logTelegram(F("Setup timer to 1sec to force process state"));
+    return;
+  }
+
+  if (message == F("/help")) {
+    logTelegram(
+        F("If you want to water plant use command /water plantX Yml, where X "
+          "in 0..15\n Example: /water plant3 50ml\n"));
+    return;
+  }
+
+  if (message.startsWith(F("/water"))) {
+    int mlPos = message.indexOf(" ", 8);
+    if (mlPos < 0) {
+      logTelegram(F("Invalid command format"));
+      return;
+    }
+    String plantId = message.substring(12, mlPos);
+    String amount = message.substring(mlPos + 1, message.length() - 2);
+    if (!isValidInteger(plantId) || !isValidInteger(amount)) {
+      logTelegram(F("Invalid command format"));
+      return;
+    }
+    serialLog((String)F("Got command from telegram to water plant id=") +
+              plantId + F(", amount=") + amount + F("ml."));
+
+    serialCommandWater(plantId.toInt(), amount.toInt());
+    return;
+  }
+}
+
 void loopTelegram() {
   if (!timerTelegramCheck.expired()) return;
   timerTelegramCheck.setDuration(repeatTelegramCheck);
@@ -227,6 +289,7 @@ void loopTelegram() {
       telegramBot.getUpdates(telegramBot.last_message_received + 1);
   if (numNewMessages == 0) return;
   serialLog(F("Telegram start communication!"));
+  logTelegram(F("Got it"));
   for (int i = 0; i < numNewMessages; i++) {
     String chatId = telegramBot.messages[i].chat_id;
     if (telegramChatId != chatId) {
@@ -234,9 +297,14 @@ void loopTelegram() {
       telegramChatId = chatId;
     }
     String message = telegramBot.messages[i].text;
+    message.trim();
     serialLog((String)F("Got message from telegram: ") + message);
+    if (message.endsWith(F("@AquatoriaAutoWatering_bot"))) {
+      message = message.substring(0, message.length() - 26);
+      serialLog((String)F("Updated message: ") + message);
+    }
+    procesTelegramMessage(message);
   }
-  logTelegram(F("Got it"));
 #endif
 }
 
@@ -274,13 +342,14 @@ void setup() {
   sett.onBuild(build);
   sett.onUpdate(updateSettings);
 
-  timerStateSend.setDuration(repeatIntervalStateSend);
+  timerStateSendIot.setDuration(repeatIntervalStateSendIot);
+  timerStateSendTelegram.setDuration(repeatIntervalStateSendTelegram);
   timerTelegramCheck.setDuration(repeatTelegramCheck);
   logTelegram(F("Hellow world"));
 }
 
 void sendMessageToIOT() {
-  serialLog(F("Start sending message..."));
+  serialLog(F("Start sending message to iot..."));
   if (true) {
     serialLog(F("Communication with iot is turned off, exit."));
     return;
@@ -319,7 +388,7 @@ void sendMessageToIOT() {
   https.end();
 }
 
-void processMessage(String message) {
+void processMessageArduino(String message) {
   logger.println(getTimestamp());
   logger.println(message);
   JsonDocument doc;
@@ -332,7 +401,23 @@ void processMessage(String message) {
     if ((String)ARDUINO_COMMAND_STATE == command) {
       State state = deserializeState(doc);
       lastState = state;
-      stateRecieved = true;
+      stateRecievedIot = true;
+      stateRecievedTelegram = true;
+
+      // подрисуем сразу точки на графике
+      PlotPoint point;
+      point.time = sett.rtc.getUnix();
+      for (int i = 0; i < PLANTS_AMOUNT; i++) {
+        point.pp[i] = lastState.plants[i].parrots;
+      }
+      if (numPlotPoints == NUM_PLOT_POINTS) {
+        for (int i = 0; i < NUM_PLOT_POINTS - 1; i++) {
+          lastPlotPoints[i] = lastPlotPoints[i + 1];
+        }
+        numPlotPoints--;
+      }
+      lastPlotPoints[numPlotPoints] = point;
+      numPlotPoints++;
 
       if (false) {
         // в случае если нужна отладка того, что десериализовалось
@@ -343,6 +428,9 @@ void processMessage(String message) {
       } else {
         serialLog(F("Processed new state"));
       }
+    } else if ((String)ARDUINO_SEND_TELEGRAM == command) {
+      const char* message = doc[F("message")];
+      logTelegram(message);
     } else {
       serialError((String)F("Unknown command ") + command);
       serialLog(message);
@@ -355,32 +443,30 @@ void loop() {
   // todo вынести в другой поток? <<<<<<<<<<<<<<<<<<<<<<
   comm.communicationTick();
   if (comm.communicationHasMessage()) {
-    processMessage(comm.communicationGetMessage());
+    processMessageArduino(comm.communicationGetMessage());
     return;
   }
 
   sett.tick();
   loopTelegram();
 
-  if (timerStateSend.expired() && stateRecieved) {
-    stateRecieved = false;
+  if (timerStateSendIot.expired() && stateRecievedIot) {
+    stateRecievedIot = false;
 
-    PlotPoint point;
-    point.time = sett.rtc.getUnix();
-    for (int i = 0; i < PLANTS_AMOUNT; i++) {
-      point.pp[i] = lastState.plants[i].parrots;
-    }
-    if (numPlotPoints == NUM_PLOT_POINTS) {
-      for (int i = 0; i < NUM_PLOT_POINTS - 1; i++) {
-        lastPlotPoints[i] = lastPlotPoints[i + 1];
-      }
-      numPlotPoints--;
-    }
-    lastPlotPoints[numPlotPoints] = point;
-    numPlotPoints++;
-
-    timerStateSend.setDuration(repeatIntervalStateSend);
+    timerStateSendIot.setDuration(repeatIntervalStateSendIot);
     sendMessageToIOT();
+    return;
+  }
+
+  if (timerStateSendTelegram.expired() && stateRecievedTelegram) {
+    stateRecievedTelegram = false;
+    serialLog("Send state to telegram");
+
+    timerStateSendTelegram.setDuration(repeatIntervalStateSendTelegram);
+    JsonDocument des = serializeState(lastState);
+    String outJson;
+    serializeJson(des, outJson);
+    logTelegram((String)F("State: ") + outJson);
     return;
   }
 }
