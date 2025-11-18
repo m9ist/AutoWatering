@@ -13,8 +13,11 @@
 #define COMMAND_KEY F("command")
 #define ESP_COMMAND_LOG F("esp_log")
 #define ESP_COMMAND_TIME_SYNCED F("esp_ntp_synchronized")
-#define ARDUINO_COMMAND_STATE F("arduino_state_update")
 #define ESP_COMMAND_WATER_PLANT F("esp_water_plant")
+#define ESP_COMMAND_CONFIG_PLANT F("esp_plant_config")
+#define ESP_COMMAND_DAILY_TASK F("esp_daily_task")
+
+#define ARDUINO_COMMAND_STATE F("arduino_state_update")
 #define ARDUINO_SEND_TELEGRAM F("arduino_telegram")
 
 struct Plant {
@@ -27,8 +30,8 @@ struct Plant {
   int parrots = 0;
   // оригинальная влажность от датчика влажности
   int originalValue = UNDEFINED_PLANT_VALUE;
-  // частота полива в часах
-  // баунд принудительной поливки
+
+  int dailyAmountMl = 0;
 };
 
 struct State {
@@ -86,8 +89,8 @@ String dateToString(Ds1302::DateTime now) {
 
 bool isDefined(Plant plant) {
   // todo <<<<<< когда будут ошибки учесть их
-  return plant.isOn == PLANT_IS_ON || plant.originalValue < UNDEFINED_PLANT_VALUE ||
-         plant.plantName != "";
+  return plant.isOn == PLANT_IS_ON ||
+         plant.originalValue < UNDEFINED_PLANT_VALUE || plant.plantName != "";
 }
 
 JsonDocument serializeState(State state) {
@@ -145,4 +148,8 @@ tm deserializeTimeInfo(JsonDocument doc) {
   timeinfo.tm_mon = doc[F("tm_mon")];
   timeinfo.tm_year = doc[F("tm_year")];
   return timeinfo;
+}
+
+void saveStateEEPROM() {
+  // todo<<<<<<<<< заменить функции в clock
 }

@@ -1,13 +1,18 @@
 // 3 дня раз для замеров раз в repeatIntervalStateSendIot
 #define NUM_PLOT_POINTS 6
 #define TURN_ON_TELEGRAM
+// #define TURN_ON_GYVER
 
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
 #include <Communication.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
+#ifdef TURN_ON_GYVER
 #include <SettingsGyver.h>
+#else
+#include <DEVFULL.h>
+#endif
 #include <State.h>
 #include <Timer.h>
 #ifdef TURN_ON_TELEGRAM
@@ -33,14 +38,20 @@ WiFiClientSecure espClient;
 String secretKey;
 #ifdef TURN_ON_TELEGRAM
 UniversalTelegramBot telegramBot(getTelegramBotToken(), espClient);
-#endif
-String telegramChatId = "817406967";
+// todo <<<<<<<<<<<<<<< по хорошему надо запоминать между запусками точку
+// общения, либо вообще на несколько точек завязаться
+String telegramChatId = "-5065686553";
 Timer timerTelegramCheck;
 const Duration repeatTelegramCheck = Timer::Seconds(10);
+#endif
 
+#ifdef TURN_ON_GYVER
 SettingsGyver sett("Auto watering");
 sets::Logger logger(2500);
 bool updatedSettings = false;
+#else
+DEVFULL logger;
+#endif
 
 Timer timerStateSendIot;
 const Duration repeatIntervalStateSendIot = Timer::Minutes(30);
@@ -67,7 +78,7 @@ String getTimestamp() {
   gmtime_r(&now, &timeinfo);
 
   char buffer[20];
-  strftime(buffer, sizeof(buffer), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
+  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%SZ", &timeinfo);
   return String(buffer);
 }
 
@@ -88,6 +99,19 @@ void serialLog(const String& s) { serialLog(ESP_COMMAND_LOG, s); }
 void serialCommandWater(int id, int amount) {
   JsonDocument json;
   json[COMMAND_KEY] = ESP_COMMAND_WATER_PLANT;
+  json[F("timestamp")] = getTimestamp();
+  json[F("plantId")] = id;
+  json[F("amountMl")] = amount;
+
+  String sendJson;
+  serializeJson(json, sendJson);
+  logger.println(sendJson);
+  comm.communicationSendMessage(sendJson);
+}
+
+void serialConfig(int id, int amount) {
+  JsonDocument json;
+  json[COMMAND_KEY] = ESP_COMMAND_CONFIG_PLANT;
   json[F("timestamp")] = getTimestamp();
   json[F("plantId")] = id;
   json[F("amountMl")] = amount;
@@ -124,6 +148,7 @@ void logTelegram(String message) {
 #endif
 }
 
+#ifdef TURN_ON_GYVER
 void build(sets::Builder& b) {
   b.Log(logger, "State");
   b.PlotStack(H(run), "p0;p1;p2;p3;p4;p5;p6;p7;p8;p9;p10;p11;p12;p13;p14;p15");
@@ -155,6 +180,7 @@ void updateSettings(sets::Updater& u) {
   }
   u.updatePlot(H(run), t);
 }
+#endif
 
 String getBearerAuthKey() {
   // если пустой или прошел час, то обновляем
@@ -254,9 +280,16 @@ void procesTelegramMessage(String message) {
   }
 
   if (message == F("/help")) {
-    logTelegram(
-        F("If you want to water plant use command /water plantX Yml, where X "
-          "in 0..15\n Example: /water plant3 50ml\n"));
+    logTelegram(F(
+        "\nIf you want to water plant use command /water plantX Yml, where X "
+        "in 0..15\n\n  Example: /water plant3 50ml\n\n\n"
+        "If you want to config water amount use command /config plantX Yml\n\n"
+        "  Example: /config plant2 20ml"));
+    return;
+  }
+
+  if (message == F("/daily")) {
+    serialLog(ESP_COMMAND_DAILY_TASK, "From telegram");
     return;
   }
 
@@ -276,6 +309,25 @@ void procesTelegramMessage(String message) {
               plantId + F(", amount=") + amount + F("ml."));
 
     serialCommandWater(plantId.toInt(), amount.toInt());
+    return;
+  }
+
+  if (message.startsWith(F("/config"))) {
+    int mlPos = message.indexOf(" ", 9);
+    if (mlPos < 0) {
+      logTelegram(F("Invalid command format"));
+      return;
+    }
+    String plantId = message.substring(13, mlPos);
+    String amount = message.substring(mlPos + 1, message.length() - 2);
+    if (!isValidInteger(plantId) || !isValidInteger(amount)) {
+      logTelegram(F("Invalid command format"));
+      return;
+    }
+    serialLog((String)F("Got command from telegram to water plant id=") +
+              plantId + F(", amount=") + amount + F("ml."));
+
+    serialConfig(plantId.toInt(), amount.toInt());
     return;
   }
 }
@@ -338,14 +390,16 @@ void setup() {
 
   setupWifiClient();
 
+#ifdef TURN_ON_GYVER
   sett.begin();
   sett.onBuild(build);
   sett.onUpdate(updateSettings);
+#endif
 
   timerStateSendIot.setDuration(repeatIntervalStateSendIot);
   timerStateSendTelegram.setDuration(repeatIntervalStateSendTelegram);
   timerTelegramCheck.setDuration(repeatTelegramCheck);
-  logTelegram(F("Hellow world"));
+  logTelegram(F("Esp started successfully."));
 }
 
 void sendMessageToIOT() {
@@ -406,7 +460,8 @@ void processMessageArduino(String message) {
 
       // подрисуем сразу точки на графике
       PlotPoint point;
-      point.time = sett.rtc.getUnix();
+      time_t now = time(nullptr);
+      point.time = now;
       for (int i = 0; i < PLANTS_AMOUNT; i++) {
         point.pp[i] = lastState.plants[i].parrots;
       }
@@ -447,7 +502,9 @@ void loop() {
     return;
   }
 
+#ifdef TURN_ON_GYVER
   sett.tick();
+#endif
   loopTelegram();
 
   if (timerStateSendIot.expired() && stateRecievedIot) {

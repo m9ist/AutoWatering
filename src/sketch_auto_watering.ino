@@ -53,6 +53,65 @@ void setup() {
 
 uint32_t test_time = 0;
 
+void sendTelegram(String message) {
+  JsonDocument toSend;
+  toSend[COMMAND_KEY] = ARDUINO_SEND_TELEGRAM;
+  toSend[F("message")] = (String)F("Arduino: ") + message;
+  String out;
+  serializeJson(toSend, out);
+  writeln(out);
+  comm.communicationSendMessage(out);
+}
+
+void processEspCommand(JsonDocument& doc) {
+  const char* command = doc[COMMAND_KEY];
+  if ((String)ESP_COMMAND_LOG == command) {
+    // уже залогировали, ничего не делаем
+    return;
+  }
+
+  if ((String)ESP_COMMAND_TIME_SYNCED == command) {
+    tm timeinfo = deserializeTimeInfo(doc);
+    setupDate(timeinfo);
+    global_state.espConnectedAndTimeSynced = true;
+    loopScreen();
+    return;
+  }
+
+  if ((String)ESP_COMMAND_WATER_PLANT == command) {
+    int id = doc[F("plantId")];
+    int amount = doc[F("amountMl")];
+    // waterPlant(id, amount); //<<<<<<<<<<<<<
+    String info = (String)F("Did nothing WATERING with ") + id + " " + amount;
+    sendTelegram(info);
+    return;
+  }
+
+  if ((String)ESP_COMMAND_CONFIG_PLANT == command) {
+    int id = doc[F("plantId")];
+    int amount = doc[F("amountMl")];
+    global_state.plants[id].dailyAmountMl = amount;
+    saveStateEEPROM();
+    String info = "Current config: "; // оборачивать в F нельзя, виснет...
+    // info += F("Current config: ");
+    for (int i = 0; i < PLANTS_AMOUNT; i++) {
+      if (global_state.plants[i].dailyAmountMl > 0) {
+        info += (String)F("plant ") + i + F(" = ") +
+                global_state.plants[i].dailyAmountMl + F(" ml, ");
+      }
+    }
+    sendTelegram(info);
+    return;
+  }
+
+  if ((String)ESP_COMMAND_DAILY_TASK == command) {
+    sendTelegram(F("Do nothing with daily task command"));
+    return;
+  }
+
+  writeln((String)F("Unknown command ") + command);
+}
+
 void loop() {
   // сначала делаем дешевые операции, все дорогие делаем в конце функции
   comm.communicationTick();
@@ -67,30 +126,7 @@ void loop() {
     if (error != DeserializationError::Ok) {
       writeln((String)F("Can't deserialize ") + error.c_str());
     } else {
-      const char* command = doc[COMMAND_KEY];
-      if ((String)ESP_COMMAND_LOG == command) {
-        // уже залогировали, ничего не делаем
-      } else if ((String)ESP_COMMAND_TIME_SYNCED == command) {
-        tm timeinfo = deserializeTimeInfo(doc);
-        setupDate(timeinfo);
-        global_state.espConnectedAndTimeSynced = true;
-        loopScreen(); //*
-       } else if ((String)ESP_COMMAND_WATER_PLANT == command) {
-        //*
-         int id = doc[F("plantId")];
-         int amount = doc[F("amountMl")];
-         String info = (String)F("Did nothing with ") + id + " " + amount;//waterPlant(id, amount); //<<<<<<<<<<<<<
-         JsonDocument toSend;
-         toSend[COMMAND_KEY] = ARDUINO_SEND_TELEGRAM;
-         toSend[F("message")] = (String) F("Arduino: ") + info;
-         String out;
-         serializeJson(toSend, out);
-         writeln(out);
-         comm.communicationSendMessage(out);
-         //*/
-      } else {
-        writeln((String)F("Unknown command ") + command);
-      }
+      processEspCommand(doc);
     }
     // todo process command
     return;
@@ -110,11 +146,11 @@ void loop() {
     return;
   }
 
-  /* 
+  /*
   for (int i = 0; i < 16; i++) {
     if (isWaterNowButtonPressed(i)) {
-      // drawScreenMessage((String)F("Start water plant ") + i);//todo <<<<<<<<<<<<<<<<<<<< победить фигню
-      startWaterPlant(i);
+      // drawScreenMessage((String)F("Start water plant ") + i);//todo
+  <<<<<<<<<<<<<<<<<<<< победить фигню startWaterPlant(i);
 
       while (isWaterNowButtonPressed(i)) {
       }
