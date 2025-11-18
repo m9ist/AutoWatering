@@ -20,6 +20,9 @@
 #define ARDUINO_COMMAND_STATE F("arduino_state_update")
 #define ARDUINO_SEND_TELEGRAM F("arduino_telegram")
 
+#define EEPROM_VERSION 1
+
+// Изменил, обнови EEPROM_VERSION
 struct Plant {
   // включено ли растение PLANT_IS_OFF_USER - выключен тумблер ??? - отключение
   // по ошибке PLANT_IS_ON - включено
@@ -34,6 +37,7 @@ struct Plant {
   int dailyAmountMl = 0;
 };
 
+// Изменил, обнови EEPROM_VERSION
 struct State {
   // если что-то где-то обновилось и можно отослать стейт в esp и лог
   bool updated = false;
@@ -99,13 +103,17 @@ JsonDocument serializeState(State state) {
   out[F("t")] = state.temperature;
   out[F("h")] = state.humidity;
 
+  int id = 0;
   for (int i = 0; i < PLANTS_AMOUNT; i++) {
+    // акууратенее с id и i
     if (!isDefined(state.plants[i])) continue;
-    out[F("p")][i][F("id")] = i;
-    out[F("p")][i][F("on")] = state.plants[i].isOn;
-    out[F("p")][i][F("d")] = state.plants[i].plantName;
-    out[F("p")][i][F("p")] = state.plants[i].parrots;
-    out[F("p")][i][F("or")] = state.plants[i].originalValue;
+    out[F("p")][id][F("id")] = i;
+    out[F("p")][id][F("on")] = state.plants[i].isOn;
+    out[F("p")][id][F("d")] = state.plants[i].plantName;
+    out[F("p")][id][F("p")] = state.plants[i].parrots;
+    out[F("p")][id][F("or")] = state.plants[i].originalValue;
+    out[F("p")][id][F("m")] = state.plants[i].dailyAmountMl;
+    id++;
   }
 
   return out;
@@ -117,12 +125,14 @@ State deserializeState(JsonDocument doc) {
   out.humidity = doc[F("h")];
 
   for (size_t i = 0; i < doc[F("p")].size(); i++) {
+    // акууратенее с id и i
     int id = doc[F("p")][i][F("id")];
     out.plants[id].isOn = doc[F("p")][i][F("on")];
     const char* plantName = doc[F("p")][i][F("d")];
     out.plants[id].plantName = plantName;
     out.plants[id].parrots = doc[F("p")][i][F("p")];
     out.plants[id].originalValue = doc[F("p")][i][F("or")];
+    out.plants[id].dailyAmountMl = doc[F("p")][i][F("m")];
   }
 
   return out;
@@ -148,8 +158,4 @@ tm deserializeTimeInfo(JsonDocument doc) {
   timeinfo.tm_mon = doc[F("tm_mon")];
   timeinfo.tm_year = doc[F("tm_year")];
   return timeinfo;
-}
-
-void saveStateEEPROM() {
-  // todo<<<<<<<<< заменить функции в clock
 }

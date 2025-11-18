@@ -4,6 +4,7 @@
 #include <State.h>
 #include <Time.h>
 #include <Timer.h>
+#include <EEPROM.h>
 
 #define IS_DEBUG true
 #define DATA_CHUNK_SIZE 63  // SERIAL_TX_BUFFER_SIZE
@@ -31,6 +32,28 @@ int freeRam() {
 
 void logFreeRam() { writeln((String)F("Free RAM: ") + freeRam()); }
 
+void loadStateEEPROM() {
+  int address = 0;
+  int version;
+  EEPROM.get(address, version);
+  if (version != EEPROM_VERSION) {
+    Serial.println("Bad version of EEPROM in memory");
+  } else {
+    address += sizeof(int);
+    EEPROM.get(address, global_state);
+    Serial.println("Loaded state from eeprom");
+  }
+}
+
+void saveStateEEPROM() {
+  int address = 0;
+  int version = EEPROM_VERSION;
+  EEPROM.put(address, version);
+  address += sizeof(int);
+  EEPROM.put(address, global_state);
+  writeln("Saved state to eeprom");
+}
+
 void setup() {
   Serial.begin(9600);
   Serial3.begin(115200);
@@ -39,6 +62,7 @@ void setup() {
 
   writeln(F("Start working"));
   logFreeRam();
+  loadStateEEPROM();
   initLogging();
   initClock();
   initScreen();
@@ -92,8 +116,7 @@ void processEspCommand(JsonDocument& doc) {
     int amount = doc[F("amountMl")];
     global_state.plants[id].dailyAmountMl = amount;
     saveStateEEPROM();
-    String info = "Current config: "; // оборачивать в F нельзя, виснет...
-    // info += F("Current config: ");
+    String info = "Current config: ";  // оборачивать в F нельзя, виснет...
     for (int i = 0; i < PLANTS_AMOUNT; i++) {
       if (global_state.plants[i].dailyAmountMl > 0) {
         info += (String)F("plant ") + i + F(" = ") +
@@ -115,9 +138,7 @@ void processEspCommand(JsonDocument& doc) {
 void loop() {
   // сначала делаем дешевые операции, все дорогие делаем в конце функции
   comm.communicationTick();
-  // if (Serial3.available() > 0) {
-  // String message = Serial3.readStringUntil('\n');
-  // message.trim();
+
   if (comm.communicationHasMessage()) {
     String message = comm.communicationGetMessage();
     writeln(message);
@@ -128,7 +149,6 @@ void loop() {
     } else {
       processEspCommand(doc);
     }
-    // todo process command
     return;
   }
 

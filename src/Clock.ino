@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <Ds1302.h>
-#include <EEPROM.h>
 #include <time.h>
 
 #define PIN_ENA 41
@@ -43,7 +42,6 @@ void initClock() {
 
     rtc.setDateTime(&dt);
   }
-  loadNextTaskRuning();
 
   global_state.startUpDate = getNow();
 }
@@ -58,20 +56,6 @@ void setupDate(tm timeinfo) {
                          .second = timeinfo.tm_sec};
 
   rtc.setDateTime(&dt);
-}
-
-void saveNextTaskRuning() {
-  int address = 0;
-  EEPROM.put(address, global_state.nextTaskRuning);
-  writeln("Saved next water task:");
-  writeln(dateToString(global_state.nextTaskRuning));
-}
-
-void loadNextTaskRuning() {
-  int address = 0;
-  EEPROM.get(address, global_state.nextTaskRuning);
-  writeln("Loaded next water task:");
-  writeln(dateToString(global_state.nextTaskRuning));
 }
 
 void normalizeDate(Ds1302::DateTime newDate) {
@@ -134,7 +118,7 @@ bool runNextDayTask() {
     global_state.nextTaskRuning = getNow();
     global_state.nextTaskRuning.day++;
     normalizeDate(global_state.nextTaskRuning);
-    saveNextTaskRuning();
+    saveStateEEPROM();
 
     return true;
   }
