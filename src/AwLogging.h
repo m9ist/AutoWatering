@@ -13,8 +13,7 @@
 #define SD_SCK_PIN A14
 
 class AwLogging {
- protected:
-  SdFs sd;
+ private:
   FsFile file;
   bool _sdIsInited = false;
 
@@ -46,6 +45,8 @@ class AwLogging {
     SoftSpiDriver<SD_MISO_PIN, SD_MOSI_PIN, SD_SCK_PIN> softSpi;
     SdSpiConfig sd_config =
         SdSpiConfig(SD_CS_PIN, DEDICATED_SPI, SD_SCK_MHZ(0), &softSpi);
+    SdFs sd;
+    file = FsFile();
     if (!sd.begin(sd_config)) {
       sd.initErrorPrint();
       return;

@@ -1,13 +1,16 @@
 #include <ArduinoJson.h>
+#include <AwClock.h>
 #include <AwLogging.h>
 #include <Communication.h>
 #include <Ds1302.h>
 #include <EEPROM.h>
 #include <Screen.h>
+#include <Sensors.h>
 #include <State.h>
 #include <Time.h>
 #include <Timer.h>
-
+#include <Pomp.h>
+;
 #define IS_DEBUG true
 
 // Alt + Shift + F - автоформатирование кода
@@ -16,6 +19,9 @@
 
 State global_state;
 AwLogging logger;
+Sensors sensors;
+AwClock awClock;
+Pomp pomp;
 
 void stateUpdated() {
   // todo подумать о том, чтобы сохранять источник, время, "широту обновления"
@@ -68,12 +74,12 @@ void setup() {
   global_state.sdInited = false;
   global_state.espConnectedAndTimeSynced = false;
   logger.init(global_state);
-  initClock();
+  awClock.initClock(global_state, logger);
   initScreen(logger);
 
-  initSensors();
-  updatePlantsState(false);
-  initPomp();
+  sensors.init(logger);
+  pomp.initPomp();
+  pomp.updatePlantsState(global_state);
 
   timerSensorsCheck.setDuration(Timer::Seconds(5));
   logger.writeln(F("End init arduino"));
@@ -100,7 +106,7 @@ void processEspCommand(JsonDocument& doc) {
 
   if ((String)ESP_COMMAND_TIME_SYNCED == command) {
     tm timeinfo = deserializeTimeInfo(doc);
-    setupDate(timeinfo);
+    awClock.setupDate(timeinfo, logger);
     global_state.espConnectedAndTimeSynced = true;
     loopScreen(global_state);
     return;
@@ -160,25 +166,26 @@ void loop() {
     logFreeRam();
     JsonDocument toSend = serializeState(global_state);
     String out;
-    logger.writeln((String)F("Expected string length ") + (measureJson(toSend) + 1));
+    logger.writeln((String)F("Expected string length ") +
+                   (measureJson(toSend) + 1));
     serializeJson(toSend, out);
     logger.writeln(out);
     comm.communicationSendMessage(out);
     global_state.updated = false;
     // todo придумать более красивую схему обновления экрана
-    loopScreen(global_state);  
+    loopScreen(global_state);
     logFreeRam();
     return;
   }
 
   //*
   for (int i = 0; i < 16; i++) {
-    if (isWaterNowButtonPressed(i)) {
+    if (pomp.isWaterNowButtonPressed(i)) {
       // drawScreenMessage((String)F("Start water plant ") + i);  // todo
       // drawScreenMessage(F("Test"), logger.writeln);
       // <<<<<<<<<<<<<<<<<<<< победить фигню startWaterPlant(i);
 
-      while (isWaterNowButtonPressed(i)) {
+      while (pomp.isWaterNowButtonPressed(i)) {
       }
 
       // String info = stopWaterPlant(i);
@@ -193,11 +200,15 @@ void loop() {
   }
   //*/
 
-  updatePlantsState(true);
+  bool wasUpdate = pomp.updatePlantsState(global_state);
+  if (wasUpdate) {
+    stateUpdated();
+  }
 
   if (timerSensorsCheck.expired()) {
     timerSensorsCheck.setDuration(repeatIntervalSensorsCheck);
-    loopSensors();
+    sensors.loopSensors(logger, global_state);
+    stateUpdated();
     return;
   }
 
@@ -207,6 +218,7 @@ void loop() {
 
   /*
   if (runNextDayTask()) {  // todo проверка на корректность времени
+        saveStateEEPROM();
     logger.writeln(F("Runing daily task..."));
     buzzerCommand();
 
