@@ -21,14 +21,14 @@ Ds1302::DateTime getNow() {
 }
 
 void initClock() {
-  writeln("Init clock");
+  logger.writeln("Init clock");
   // initialize the RTC
   rtc.init();
-  writeln("Clock inited");
+  logger.writeln("Clock inited");
 
   // установить первоначальное время
   if (false) {
-    writeln("RTC is halted. Setting time...");
+    logger.writeln("RTC is halted. Setting time...");
     // rtc.halt();
     Ds1302::DateTime dt = {
         .year = 25,
@@ -47,7 +47,7 @@ void initClock() {
 }
 
 void setupDate(tm timeinfo) {
-  writeln("Setting time...");
+  logger.writeln("Setting time...");
   Ds1302::DateTime dt = {.year = timeinfo.tm_year - 100,
                          .month = 1 + timeinfo.tm_mon,
                          .day = timeinfo.tm_mday,

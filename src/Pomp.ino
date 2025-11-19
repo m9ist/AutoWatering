@@ -85,12 +85,12 @@ bool isWaterNowButtonPressed(int id) {
 //---------- блок с помпой
 
 void startPomp() {
-  writeln(F("Start pomp"));
+  logger.writeln(F("Start pomp"));
   digitalWrite(PIN_POMP, HIGH);
 }
 
 void stopPomp() {
-  writeln(F("Stop pomp"));
+  logger.writeln(F("Stop pomp"));
   digitalWrite(PIN_POMP, LOW);
 }
 
@@ -100,13 +100,12 @@ void startWaterPlant(int id) {
   String out = "Watering plant ";
   out += id;
   timeCheck = millis();
-  drawScreenMessage(out);
+  drawScreenMessage(out, logger);
 
   turnOnValve(id);
   startPomp();
 }
 
-//*
 String stopWaterPlant(int id) {
   stopPomp();
   turnOffValve(id);
@@ -120,14 +119,13 @@ String waterPlant(int id, int amounMl) {
   return (String) F("Done task water plant ") + id + F(" with ") + amounMl +
          F("ml. Did nothing!!!");
 }
-//*/
 
 // --------- блок с клапанами
 
 void turnOnValve(int id) {
   String out = F("ON valve");
   out += id;
-  writeln(out);
+  logger.writeln(out);
   bitWrite(currentState, patchValveId(id), HIGH);
   sendNewStateValves(currentState);
 }
@@ -135,7 +133,7 @@ void turnOnValve(int id) {
 void turnOffValve(int id) {
   String out = F("OFF valve");
   out += id;
-  writeln(out);
+  logger.writeln(out);
   bitWrite(currentState, patchValveId(id), LOW);
   sendNewStateValves(currentState);
 }

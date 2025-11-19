@@ -27,7 +27,7 @@ SHT31_SWW sht31(0x44, &wireTempSensor);
 void funCountInt() { varF++; }
 
 void initSensors() {
-  writeln("Start init sensors");
+  logger.writeln("Start init sensors");
 
   // работа с датчиком влажности и температуры
   wireTempSensor.begin();
@@ -41,7 +41,7 @@ void initSensors() {
   attachInterrupt(intSensor, funCountInt, RISING);
   if (intSensor < 0) {
     // todo добавить в ошибки
-    writeln("!!!!!!!!!!!!!Указан вывод без EXT INT");
+    logger.writeln("!!!!!!!!!!!!!Указан вывод без EXT INT");
   }
 
   // схема с мультиплексором для датчиков влажности почвы
@@ -88,7 +88,7 @@ void loopWaterFlowSensor() {
     // Определяем объем воды мл.
     varV += varQ;
     // Выводим рассчитанные данные:
-    writeln((String) "Объем " + varV + "мл, скорость " + (varQ * 60.0f) +
+    logger.writeln((String) "Объем " + varV + "мл, скорость " + (varQ * 60.0f) +
                    "мл/м.");
   }
 }
@@ -108,7 +108,7 @@ void loopSoilMoistureSensors() {
 }
 
 void loopSensors() {
-  writeln("Start loop sensors.");
+  logger.writeln("Start loop sensors.");
   loopWaterFlowSensor();
   loopSoilMoistureSensors();
   sht31.read(false);

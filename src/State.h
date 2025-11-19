@@ -1,3 +1,5 @@
+#ifndef STATE_H
+#define STATE_H
 #include <ArduinoJson.h>
 #include <Ds1302.h>
 #include <Time.h>
@@ -159,3 +161,5 @@ tm deserializeTimeInfo(JsonDocument doc) {
   timeinfo.tm_year = doc[F("tm_year")];
   return timeinfo;
 }
+
+#endif
