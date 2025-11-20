@@ -5,11 +5,14 @@
 #include <Ds1302.h>
 #include <EEPROM.h>
 #include <Pomp.h>
+#include <Pomp.h>
 #include <Screen.h>
 #include <Sensors.h>
 #include <State.h>
 #include <Time.h>
 #include <Timer.h>
+#include <avr/wdt.h>
+
 #include <avr/wdt.h>
 
 #define IS_DEBUG true
@@ -55,6 +58,17 @@ void saveStateEEPROM() {
   logger.writeln("Saved state to eeprom");
 }
 
+int freeRam() {
+  extern int __heap_start, *__brkval;
+  int v;
+  return (int)&v - (__brkval == 0 ? (int)&__heap_start : (int)__brkval);
+}
+
+void logFreeRam() {
+  global_state.freeMemorySize = freeRam();
+  logger.logFreeRam(global_state.freeMemorySize);
+}
+
 void setup() {
   Serial.begin(9600);
   Serial3.begin(115200);
@@ -63,7 +77,7 @@ void setup() {
 
   Serial.println(F("Start working"));
   wdt_enable(WDTO_8S);
-  logger.logFreeRam();
+  logFreeRam();
   loadStateEEPROM();
   global_state.sdInited = false;
   global_state.espConnectedAndTimeSynced = false;
@@ -71,6 +85,7 @@ void setup() {
   awClock.initClock(global_state, logger);
   initScreen(logger);
 
+  sensors.init(logger, global_state);
   sensors.init(logger, global_state);
   pomp.initPomp();
   pomp.updatePlantsState(global_state);
@@ -89,12 +104,12 @@ void sendTelegram(String message) {
   serializeJson(toSend, out);
   logger.writeln(out);
   comm.communicationSendMessage(out);
-  logger.logFreeRam();
+  logFreeRam();
 }
 
 void waterPlant(int id, int amount) {
   String info = pomp.waterPlant(id, amount);
-  logger.logFreeRam();
+  logFreeRam();
   sendTelegram(info);
   delay(10);
 }
@@ -103,7 +118,7 @@ void runDailyCommand() {
   logger.buzzerCommand();
   sendTelegram(F("Start daily task."));
   for (int i = 0; i < PLANTS_AMOUNT; i++) {
-    logger.logFreeRam();
+    logFreeRam();
     Plant plant = global_state.plants[i];
     if (plant.isOn != PLANT_IS_ON || plant.dailyAmountMl <= 0) {
       continue;
@@ -133,6 +148,8 @@ void processEspCommand(JsonDocument& doc) {
     int amount = doc[F("amountMl")];
     logger.buzzerCommand();
     waterPlant(id, amount);
+    logger.buzzerCommand();
+    waterPlant(id, amount);
     return;
   }
 
@@ -154,6 +171,7 @@ void processEspCommand(JsonDocument& doc) {
 
   if ((String)ESP_COMMAND_DAILY_TASK == command) {
     runDailyCommand();
+    runDailyCommand();
     return;
   }
 
@@ -162,8 +180,10 @@ void processEspCommand(JsonDocument& doc) {
 
 void loop() {
   wdt_reset();
+  wdt_reset();
   // сначала делаем дешевые операции, все дорогие делаем в конце функции
   comm.communicationTick();
+  wdt_reset();
   wdt_reset();
 
   if (comm.communicationHasMessage()) {
@@ -176,7 +196,7 @@ void loop() {
     } else {
       processEspCommand(doc);
     }
-    logger.logFreeRam();
+    logFreeRam();
     return;
   }
 
@@ -200,16 +220,22 @@ void loop() {
     if (pomp.isWaterNowButtonPressed(i)) {
       drawScreenMessage((String)F("Start water plant ") + i, logger);
       pomp.startWaterPlant(i, logger);
+      drawScreenMessage((String)F("Start water plant ") + i, logger);
+      pomp.startWaterPlant(i, logger);
 
       while (pomp.isWaterNowButtonPressed(i)) {
+        wdt_reset();
         wdt_reset();
       }
 
       String info = pomp.stopWaterPlant(i, logger);
       drawScreenMessage(info, logger);
+      String info = pomp.stopWaterPlant(i, logger);
+      drawScreenMessage(info, logger);
       // todo <<<<<< подумать как отказаться от этого, обдумать всю схему работы
       // с экраном
       delay(3000);
+      wdt_reset();
       wdt_reset();
 
       loopScreen(global_state);
@@ -221,6 +247,7 @@ void loop() {
   if (wasUpdate) {
     stateUpdated();
     saveStateEEPROM();
+    saveStateEEPROM();
   }
 
   if (timerSensorsCheck.expired()) {
@@ -230,6 +257,9 @@ void loop() {
     return;
   }
 
+  if (isCheckButtonPressed()) {
+    runDailyCommand();
+  }
   if (isCheckButtonPressed()) {
     runDailyCommand();
   }

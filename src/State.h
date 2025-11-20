@@ -12,30 +12,35 @@
 #define DATA_CHUNK_SIZE 62  // SERIAL_TX_BUFFER_SIZE
 #define UNDEFINED_PLANT_VALUE 1022
 
-#define COMMAND_KEY F("command")
+#define COMMAND_KEY F("c")
 #define ESP_COMMAND_LOG F("esp_log")
-#define ESP_COMMAND_TIME_SYNCED F("esp_ntp_synchronized")
-#define ESP_COMMAND_WATER_PLANT F("esp_water_plant")
-#define ESP_COMMAND_CONFIG_PLANT F("esp_plant_config")
-#define ESP_COMMAND_DAILY_TASK F("esp_daily_task")
+#define ESP_COMMAND_TIME_SYNCED F("esp_ntp")
+#define ESP_COMMAND_WATER_PLANT F("esp_water")
+#define ESP_COMMAND_CONFIG_PLANT F("esp_plant_conf")
+#define ESP_COMMAND_DAILY_TASK F("esp_daily")
 
-#define ARDUINO_COMMAND_STATE F("arduino_state_update")
-#define ARDUINO_SEND_TELEGRAM F("arduino_telegram")
+#define ARDUINO_COMMAND_STATE F("state")
+#define ARDUINO_SEND_TELEGRAM F("arduino_tg")
 
-#define EEPROM_VERSION 3
+#define EEPROM_VERSION 4
 
 // Изменил, обнови EEPROM_VERSION
 struct Plant {
   // включено ли растение PLANT_IS_OFF_USER - выключен тумблер ??? - отключение
   // по ошибке PLANT_IS_ON - включено
   uint8_t isOn = PLANT_IS_UNDEFINED;
+  uint8_t isOn = PLANT_IS_UNDEFINED;
   // краткое описание растения (горшок, название и тд)
+  char plantName[10] = "";
   char plantName[10] = "";
   // сколько в процентах влажности 0..99
   uint8_t parrots = 0;
+  uint8_t parrots = 0;
   // оригинальная влажность от датчика влажности
   uint16_t originalValue = UNDEFINED_PLANT_VALUE;
+  uint16_t originalValue = UNDEFINED_PLANT_VALUE;
 
+  uint16_t dailyAmountMl = 0;
   uint16_t dailyAmountMl = 0;
 };
 
@@ -48,6 +53,8 @@ struct State {
   bool pompIsOn = false;
   bool espConnectedAndTimeSynced = false;
   bool temperatureSensorInited = false;
+
+  int freeMemorySize = 0;
 
   Plant plants[PLANTS_AMOUNT];
 
@@ -64,6 +71,7 @@ struct State {
   // последняя проверка датчиков влажности
   // time_t lastCheck;
   // частота проверки датчиков влажности в минутах
+  // int checkFrequencyInMinutes = 30;
   // int checkFrequencyInMinutes = 30;
   // частота отправки данных в яндекс
   int sendIotFrequencyInMinutes = 60;
@@ -98,13 +106,18 @@ bool isDefined(Plant plant) {
   // todo <<<<<< когда будут ошибки учесть их
   return plant.isOn == PLANT_IS_ON;
   //|| plant.originalValue < UNDEFINED_PLANT_VALUE || plant.plantName != "";
+  return plant.isOn == PLANT_IS_ON;
+  //|| plant.originalValue < UNDEFINED_PLANT_VALUE || plant.plantName != "";
 }
 
 JsonDocument serializeState(State state) {
   JsonDocument out;
   out[COMMAND_KEY] = ARDUINO_COMMAND_STATE;
-  out[F("t")] = state.temperature;
-  out[F("h")] = state.humidity;
+  int hum = state.humidity * 10;
+  int temp = state.temperature * 10;
+  out[F("t")] = temp;
+  out[F("h")] = hum;
+  out[F("ram")] = state.freeMemorySize;
 
   int id = 0;
   for (int i = 0; i < PLANTS_AMOUNT; i++) {
@@ -112,6 +125,7 @@ JsonDocument serializeState(State state) {
     if (!isDefined(state.plants[i])) continue;
     out[F("p")][id][F("id")] = i;
     out[F("p")][id][F("on")] = state.plants[i].isOn;
+    // out[F("p")][id][F("d")] = state.plants[i].plantName;
     // out[F("p")][id][F("d")] = state.plants[i].plantName;
     out[F("p")][id][F("p")] = state.plants[i].parrots;
     out[F("p")][id][F("or")] = state.plants[i].originalValue;
@@ -124,13 +138,19 @@ JsonDocument serializeState(State state) {
 
 State deserializeState(JsonDocument doc) {
   State out;
-  out.temperature = doc[F("t")];
-  out.humidity = doc[F("h")];
+  int temp = doc[F("t")];
+  int hum = doc[F("h")];
+  out.temperature = (float)temp / 10;
+  out.humidity = (float)hum / 10;
+  out.freeMemorySize = doc[F("ram")];
 
   for (size_t i = 0; i < doc[F("p")].size(); i++) {
     // акууратенее с id и i
     int id = doc[F("p")][i][F("id")];
     out.plants[id].isOn = doc[F("p")][i][F("on")];
+    // const char* plantName = doc[F("p")][i][F("d")];
+    // strlcpy(out.plants[id].plantName, plantName,
+    //         sizeof(out.plants[id].plantName));
     // const char* plantName = doc[F("p")][i][F("d")];
     // strlcpy(out.plants[id].plantName, plantName,
     //         sizeof(out.plants[id].plantName));
