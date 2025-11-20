@@ -15,9 +15,6 @@ class AwClock {
   // const static char* WeekDays[] = {"Monday", "Tuesday",  "Wednesday",
   // "Thursday", "Friday", "Saturday", "Sunday"};
 
-  // Ds1302::DateTime nextTaskRuning;
-  // Ds1302::DateTime startUpDate;
-
   Ds1302::DateTime getNow() {
     Ds1302::DateTime now;
     rtc.getDateTime(&now);
@@ -74,6 +71,10 @@ class AwClock {
     return check.second < now.second;
   }
 
+ public:
+  AwClock() {};
+  ~AwClock() {};
+
   bool runNextDayTask(State& state, AwLogging& logger) {
     if (isNowAfter(state.nextTaskRuning)) {
       logger.writeln(dateToString(state.nextTaskRuning) + F(" < ") +
@@ -87,39 +88,18 @@ class AwClock {
     }
     return false;
   }
-  /* data */
- public:
-  AwClock(/* args */) {};
-  ~AwClock() {};
 
   void initClock(State& state, AwLogging& logger) {
-    logger.writeln("Init clock");
+    logger.writeln(F("Init clock"));
     // initialize the RTC
     rtc.init();
-    logger.writeln("Clock inited");
-
-    // установить первоначальное время
-    if (false) {
-      logger.writeln("RTC is halted. Setting time...");
-      // rtc.halt();
-      Ds1302::DateTime dt = {
-          .year = 25,
-          .month = Ds1302::MONTH_OCT,  // в библиотеке опечатка, новая версия не
-                                       // подхватывается
-          .day = 3,
-          .hour = 14,
-          .minute = 34,
-          .second = 00,
-          .dow = Ds1302::DOW_FRI};
-
-      rtc.setDateTime(&dt);
-    }
+    logger.writeln(F("Clock inited"));
 
     state.startUpDate = getNow();
   }
 
   void setupDate(tm timeinfo, AwLogging& logger) {
-    logger.writeln("Setting time...");
+    logger.writeln(F("Setting time..."));
     Ds1302::DateTime dt = {.year = timeinfo.tm_year - 100,
                            .month = 1 + timeinfo.tm_mon,
                            .day = timeinfo.tm_mday,

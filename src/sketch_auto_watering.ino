@@ -4,13 +4,14 @@
 #include <Communication.h>
 #include <Ds1302.h>
 #include <EEPROM.h>
+#include <Pomp.h>
 #include <Screen.h>
 #include <Sensors.h>
 #include <State.h>
 #include <Time.h>
 #include <Timer.h>
-#include <Pomp.h>
-;
+#include <avr/wdt.h>
+
 #define IS_DEBUG true
 
 // Alt + Shift + F - автоформатирование кода
@@ -31,14 +32,6 @@ void stateUpdated() {
 Timer timerSensorsCheck;
 const Duration repeatIntervalSensorsCheck = Timer::Minutes(1);
 Communication comm = Communication(Serial3, Serial, false);
-
-int freeRam() {
-  extern int __heap_start, *__brkval;
-  int v;
-  return (int)&v - (__brkval == 0 ? (int)&__heap_start : (int)__brkval);
-}
-
-void logFreeRam() { logger.writeln((String)F("Free RAM: ") + freeRam()); }
 
 void loadStateEEPROM() {
   int address = 0;
@@ -69,7 +62,8 @@ void setup() {
   }
 
   Serial.println(F("Start working"));
-  logFreeRam();
+  wdt_enable(WDTO_8S);
+  logger.logFreeRam();
   loadStateEEPROM();
   global_state.sdInited = false;
   global_state.espConnectedAndTimeSynced = false;
@@ -77,7 +71,7 @@ void setup() {
   awClock.initClock(global_state, logger);
   initScreen(logger);
 
-  sensors.init(logger);
+  sensors.init(logger, global_state);
   pomp.initPomp();
   pomp.updatePlantsState(global_state);
 
@@ -95,6 +89,28 @@ void sendTelegram(String message) {
   serializeJson(toSend, out);
   logger.writeln(out);
   comm.communicationSendMessage(out);
+  logger.logFreeRam();
+}
+
+void waterPlant(int id, int amount) {
+  String info = pomp.waterPlant(id, amount);
+  logger.logFreeRam();
+  sendTelegram(info);
+  delay(10);
+}
+
+void runDailyCommand() {
+  logger.buzzerCommand();
+  sendTelegram(F("Start daily task."));
+  for (int i = 0; i < PLANTS_AMOUNT; i++) {
+    logger.logFreeRam();
+    Plant plant = global_state.plants[i];
+    if (plant.isOn != PLANT_IS_ON || plant.dailyAmountMl <= 0) {
+      continue;
+    }
+    waterPlant(i, plant.dailyAmountMl);
+  }
+  sendTelegram(F("Daily task is completed."));
 }
 
 void processEspCommand(JsonDocument& doc) {
@@ -115,9 +131,8 @@ void processEspCommand(JsonDocument& doc) {
   if ((String)ESP_COMMAND_WATER_PLANT == command) {
     int id = doc[F("plantId")];
     int amount = doc[F("amountMl")];
-    // waterPlant(id, amount); //<<<<<<<<<<<<<
-    String info = (String)F("Did nothing WATERING with ") + id + " " + amount;
-    sendTelegram(info);
+    logger.buzzerCommand();
+    waterPlant(id, amount);
     return;
   }
 
@@ -138,7 +153,7 @@ void processEspCommand(JsonDocument& doc) {
   }
 
   if ((String)ESP_COMMAND_DAILY_TASK == command) {
-    sendTelegram(F("Do nothing with daily task command"));
+    runDailyCommand();
     return;
   }
 
@@ -146,8 +161,10 @@ void processEspCommand(JsonDocument& doc) {
 }
 
 void loop() {
+  wdt_reset();
   // сначала делаем дешевые операции, все дорогие делаем в конце функции
   comm.communicationTick();
+  wdt_reset();
 
   if (comm.communicationHasMessage()) {
     String message = comm.communicationGetMessage();
@@ -159,11 +176,12 @@ void loop() {
     } else {
       processEspCommand(doc);
     }
+    logger.logFreeRam();
     return;
   }
 
   if (global_state.updated) {
-    logFreeRam();
+    logger.logFreeRam();
     JsonDocument toSend = serializeState(global_state);
     String out;
     logger.writeln((String)F("Expected string length ") +
@@ -174,35 +192,35 @@ void loop() {
     global_state.updated = false;
     // todo придумать более красивую схему обновления экрана
     loopScreen(global_state);
-    logFreeRam();
+    logger.logFreeRam();
     return;
   }
 
-  //*
   for (int i = 0; i < 16; i++) {
     if (pomp.isWaterNowButtonPressed(i)) {
-      // drawScreenMessage((String)F("Start water plant ") + i);  // todo
-      // drawScreenMessage(F("Test"), logger.writeln);
-      // <<<<<<<<<<<<<<<<<<<< победить фигню startWaterPlant(i);
+      drawScreenMessage((String)F("Start water plant ") + i, logger);
+      pomp.startWaterPlant(i, logger);
 
       while (pomp.isWaterNowButtonPressed(i)) {
+        wdt_reset();
       }
 
-      // String info = stopWaterPlant(i);
-      // drawScreenMessage(info); //todo <<<<<<<<<<<<<<<<<<<< победить фигню
+      String info = pomp.stopWaterPlant(i, logger);
+      drawScreenMessage(info, logger);
       // todo <<<<<< подумать как отказаться от этого, обдумать всю схему работы
       // с экраном
       delay(3000);
+      wdt_reset();
 
       loopScreen(global_state);
       return;
     }
   }
-  //*/
 
   bool wasUpdate = pomp.updatePlantsState(global_state);
   if (wasUpdate) {
     stateUpdated();
+    saveStateEEPROM();
   }
 
   if (timerSensorsCheck.expired()) {
@@ -212,27 +230,7 @@ void loop() {
     return;
   }
 
-  if (true) {
-    return;
+  if (isCheckButtonPressed()) {
+    runDailyCommand();
   }
-
-  /*
-  if (runNextDayTask()) {  // todo проверка на корректность времени
-        saveStateEEPROM();
-    logger.writeln(F("Runing daily task..."));
-    buzzerCommand();
-
-    // поливаем первое растение 20мл
-    startWaterPlant(0);
-    delay(7000);
-    stopWaterPlant(0);
-
-    // поливаем второе растение 5мл
-    startWaterPlant(1);
-    delay(1100);
-    stopWaterPlant(1);
-    loopScreen();
-    return;
-  }
-  //*/
 }

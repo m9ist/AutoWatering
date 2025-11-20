@@ -90,8 +90,12 @@ void Communication::communicationTick() {
   //************ произошел тайм аут, посылаем привет и вычитываем все до привета
   if (state != STATE_AWAIT) {
     if (timerHellowWorldSend.expired()) {
-      log.println((String)F("Send hellow world, read queue=") + queueReadSize +
-                  F(" write queue=") + queueWriteSize + F(" state=") + state);
+      log.print(F("Send hellow world, read queue="));
+      log.print(queueReadSize);
+      log.print(F(" write queue="));
+      log.print(queueWriteSize);
+      log.print(F(" state="));
+      log.println(state);
       serial.print(COMMUNICATION_HELLOW);
       timerHellowWorldSend.setDuration(intervalHellowWorldSend);
     }
@@ -129,8 +133,9 @@ void Communication::communicationTick() {
           if (ret.length() > 0) {
             log.print(F("State = "));
             log.println(state);
-            log.print(F("Got some noise in serial: "));
-            log.println(ret);
+            log.print(F("Got some noise in serial:__"));
+            log.print(ret);
+            log.println(F("__"));
           }
           return;
         }
@@ -142,14 +147,19 @@ void Communication::communicationTick() {
     if (ret.length() > 0) {
       log.print(F("State = "));
       log.println(state);
-      log.print(F("Got some noise in serial: "));
-      log.println(ret);
+      log.print(F("Got some noise in serial:__"));
+      log.print(ret);
+      log.println(F("__"));
     }
     return;
   } else {
     if (queueReadSize > 0 || queueWriteSize > 0) {
-      log.println((String)F("read queue=") + queueReadSize +
-                  F(" write queue=") + queueWriteSize + F(" state=") + state);
+      log.print(F("read queue="));
+      log.print(queueReadSize);
+      log.print(F(" write queue="));
+      log.print(queueWriteSize);
+      log.print(F(" state="));
+      log.println(state);
     }
   }
 
@@ -208,7 +218,8 @@ void Communication::communicationTick() {
     while (nextMessagePartStart < message.length()) {
       String chunk = message.substring(
           nextMessagePartStart,
-          min(message.length(), nextMessagePartStart + COMMUNICATION_DATA_CHUNK_SIZE));
+          min(message.length(),
+              nextMessagePartStart + COMMUNICATION_DATA_CHUNK_SIZE));
       nextMessagePartStart += COMMUNICATION_DATA_CHUNK_SIZE;
       printChunk(chunk);
       ret = readNextChunk();
@@ -235,6 +246,7 @@ void Communication::communicationTick() {
 
 // добавляем в исходящую очередь сообщений на отправку
 void Communication::communicationSendMessage(String message) {
+  log.println(F("Got new message to send"));
   int pos;
   if (queueWriteSize == COMMUNICATION_OUT_MESSAGES_LENGTH) {
     // перезатираем сообщение, которое стоит первым со сдвигом позиции

@@ -33,7 +33,7 @@ LCD without CS) #06 DC  -> D10/PA1 or any digital #07 BLK -> NC
 ST7789_AVR lcd = ST7789_AVR(TFT_DC, TFT_RES, TFT_CS);
 
 void initScreen(AwLogging& logger) {
-  logger.writeln("Start display init");
+  logger.writeln(F("Start display init"));
   pinMode(PIN_CHECK_BUTTON, INPUT_PULLUP);
   pinMode(PIN_UP_BUTTON, INPUT_PULLUP);
   pinMode(PIN_DOWN_BUTTON, INPUT_PULLUP);
@@ -45,9 +45,9 @@ void initScreen(AwLogging& logger) {
   lcd.setTextColor(WHITE, BLUE);
   lcd.setTextSize(5);
   lcd.setCursor(25, 50);
-  lcd.println("Hellow");
+  lcd.println(F("Hellow"));
   lcd.setCursor(35, 100);
-  lcd.println("world");
+  lcd.println(F("world"));
   delay(1000);
 }
 
@@ -71,9 +71,11 @@ uint16_t getBackground(bool isGood) { return isGood ? GREEN : RED; }
 
 // всего помещается 12 строчек, последняя с доп сдвигом на 5 пикселей
 void loopScreen(State& globalState) {
-  bool state = globalState.sdInited;
-  lcd.fillScreen(getBackground(state));
-  lcd.setTextColor(getFont(state), getBackground(state));
+  bool screenState = globalState.sdInited;
+  uint16_t screenBack = getBackground(screenState);
+  uint16_t screenFont = getFont(screenState);
+  lcd.fillScreen(screenBack);
+  lcd.setTextColor(screenFont, screenBack);
   lcd.setTextSize(2);
 
   int stepx = 1;
@@ -86,20 +88,20 @@ void loopScreen(State& globalState) {
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
   lcd.print((int)globalState.temperature);
   lcd.print((char)223);
-  lcd.print(" ");
+  lcd.print(' ');
   lcd.print((int)globalState.humidity);
-  lcd.println("%");
+  lcd.println('%');
 
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
-  lcd.println("Next task runing");
+  lcd.println(F("Next task runing"));
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
   lcd.println(dateToString(globalState.nextTaskRuning));
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
-  lcd.println("Start app date");
+  lcd.println(F("Start app date"));
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
   lcd.println(dateToString(globalState.startUpDate));
 
-  String out = "Sensors";
+  String out = F("Sensors");
   for (int i = 0; i < 16; i++) {
     if (globalState.plants[i].isOn != PLANT_IS_ON) continue;
     out += ';';
@@ -113,19 +115,24 @@ void loopScreen(State& globalState) {
   lcd.setCursor(stepx, stepy + 5 + lineHeight * 12);
   lcd.setTextColor(getFont(globalState.sdInited),
                    getBackground(globalState.sdInited));
-  lcd.print("SD");
-  lcd.setTextColor(getFont(state), getBackground(state));
-  lcd.print(" ");
+  lcd.print(F("SD"));
+  lcd.setTextColor(screenFont, screenBack);
+  lcd.print(' ');
   lcd.setTextColor(getFont(globalState.pompIsOn),
                    getBackground(globalState.pompIsOn));
-  lcd.print("pomp");
-  lcd.setTextColor(getFont(state), getBackground(state));
-  lcd.print(" ");
+  lcd.print(F("pomp"));
+  lcd.setTextColor(screenFont, screenBack);
+  lcd.print(' ');
   lcd.setTextColor(getFont(globalState.espConnectedAndTimeSynced),
                    getBackground(globalState.espConnectedAndTimeSynced));
-  lcd.print("esp");
-  lcd.setTextColor(getFont(state), getBackground(state));
-  lcd.print(" ");
+  lcd.print(F("esp"));
+  lcd.setTextColor(screenFont, screenBack);
+  lcd.print(' ');
+  lcd.setTextColor(getFont(globalState.temperatureSensorInited),
+                   getBackground(globalState.temperatureSensorInited));
+  lcd.print(F("temp"));
+  lcd.setTextColor(screenFont, screenBack);
+  lcd.print(' ');
 }
 
 bool isCheckButtonPressed() {

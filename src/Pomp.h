@@ -1,5 +1,6 @@
 #include <AwLogging.h>
 #include <State.h>
+#include <avr/wdt.h>
 
 #define PIN_REGISTER_CS 36   // stcp
 #define PIN_REGISTER_DAT 34  // ds
@@ -139,7 +140,7 @@ class Pomp {
           wasUpdate = true;
         }
       } else {
-        if (state.plants[i].isOn == PLANT_IS_ON) {
+        if (state.plants[i].isOn != PLANT_IS_OFF_USER) {
           state.plants[i].isOn = PLANT_IS_OFF_USER;
           wasUpdate = true;
         }
@@ -156,12 +157,8 @@ class Pomp {
   }
 
   void startWaterPlant(int id, AwLogging& logger) {
-    String out = "Watering plant ";
-    out += id;
+    logger.writeln((String)F("Watering plant ") + id);
     timeCheck = millis();
-    // drawScreenMessage(out, logger);
-    // todo out String <<<<<<<<<<<<<<<<<<<<<<<<<<<<<
-
     turnOnValve(id, logger);
     startPomp(logger);
   }
@@ -177,6 +174,7 @@ class Pomp {
   }
 
   String waterPlant(int id, int amounMl) {
+    wdt_reset();
     return (String)F("Done task water plant ") + id + F(" with ") + amounMl +
            F("ml. Did nothing!!!");
   }

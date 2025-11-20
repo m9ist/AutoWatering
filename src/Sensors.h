@@ -54,8 +54,8 @@ class Sensors {
       // Определяем объем воды мл.
       varV += varQ;
       // Выводим рассчитанные данные:
-      logger.writeln((String) "Объем " + varV + "мл, скорость " +
-                     (varQ * 60.0f) + "мл/м.");
+      logger.writeln((String) F("Объем ") + varV + F("мл, скорость ") +
+                     (varQ * 60.0f) + F("мл/м."));
     }
   }
 
@@ -73,14 +73,14 @@ class Sensors {
   }
 
  public:
-  void init(AwLogging& logger) {
-    logger.writeln("Start init sensors");
+  void init(AwLogging& logger, State& state) {
+    logger.writeln(F("Start init sensors"));
 
     // работа с датчиком влажности и температуры
     wireTempSensor.begin();
     bool b = sht31.begin();
-    Serial.print("SHT31 connection: ");  // todo вынести в стейт
-    Serial.println(b);
+    logger.writeln((String)F("SHT31 connection: ") + b);
+    state.temperatureSensorInited = b;
 
     // работа с датчиком кол-ва воды
     pinMode(PIN_WATER_FLOW_SENSOR, INPUT);
@@ -88,7 +88,7 @@ class Sensors {
     attachInterrupt(intSensor, funCountInt, RISING);
     if (intSensor < 0) {
       // todo добавить в ошибки
-      logger.writeln("!!!!!!!!!!!!!Указан вывод без EXT INT");
+      logger.writeln(F("!!!!!!!!!!!!!Указан вывод без EXT INT"));
     }
 
     // схема с мультиплексором для датчиков влажности почвы
@@ -113,7 +113,7 @@ class Sensors {
   }
 
   void loopSensors(AwLogging& logger, State& state) {
-    logger.writeln("Start loop sensors.");
+    logger.writeln(F("Start loop sensors."));
     loopWaterFlowSensor(logger);
     loopSoilMoistureSensors(state);
     sht31.read(false);

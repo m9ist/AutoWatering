@@ -21,10 +21,10 @@ class Communication {
 #define COMMUNICATION_TIME_OUT 10
 #define COMMUNICATION_CHUNK_END '\t'
 #define COMMUNICATION_MESSAGE_END "\n"
-#define COMMUNICATION_START "start\n"
-#define COMMUNICATION_READY "ready\n"
-#define COMMUNICATION_NEXT "next\n"
-#define COMMUNICATION_END "end\n"
+#define COMMUNICATION_START "start"
+#define COMMUNICATION_READY "ready"
+#define COMMUNICATION_NEXT "next"
+#define COMMUNICATION_END "end"
 #define COMMUNICATION_HELLOW "hellow world!\n"
 #define COMMUNICATION_DATA_CHUNK_SIZE 62  // SERIAL_TX_BUFFER_SIZE
 

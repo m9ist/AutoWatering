@@ -22,14 +22,21 @@ class AwLogging {
   // длиннее
   int startup_melody[4] = {262, 330, 392, 523};
   int startup_note_durations[4] = {400, 400, 400, 300};
+  char freeRamLogginBuffer[16];
 
   void buzzerBoot() {
-    Serial.println("Startup melody");
+    Serial.println(F("Startup melody"));
     for (int i = 0; i < 4; i++) {
       tone(PIN_BUZZER, startup_melody[i], startup_note_durations[i]);
       delay(startup_note_durations[i]);
       delay(30);
     }
+  }
+
+  int freeRam() {
+    extern int __heap_start, *__brkval;
+    int v;
+    return (int)&v - (__brkval == 0 ? (int)&__heap_start : (int)__brkval);
   }
 
  public:
@@ -41,7 +48,7 @@ class AwLogging {
     if (SD_TURNED_OFF) {
       return;
     }
-    Serial.println("Start init logging...");
+    Serial.println(F("Start init logging..."));
     SoftSpiDriver<SD_MISO_PIN, SD_MOSI_PIN, SD_SCK_PIN> softSpi;
     SdSpiConfig sd_config =
         SdSpiConfig(SD_CS_PIN, DEDICATED_SPI, SD_SCK_MHZ(0), &softSpi);
@@ -57,13 +64,28 @@ class AwLogging {
     Serial.println(F("SD is inited."));
   }
 
+  void logFreeRam() { 
+    snprintf(freeRamLogginBuffer, sizeof(freeRamLogginBuffer), "Free RAM: %d", freeRam());
+    Serial.println(freeRamLogginBuffer);
+    if (SD_TURNED_OFF || !_sdIsInited) {
+      return;
+    }
+
+    if (!file.open(F("LOG.txt"), FILE_WRITE)) {
+      Serial.println(F("open file failed"));
+    } else {
+      file.println(freeRamLogginBuffer);
+      file.close();
+    }
+  }
+
   void writeln(String dataString) {
     Serial.println(dataString);
     if (SD_TURNED_OFF || !_sdIsInited) {
       return;
     }
 
-    if (!file.open("LOG.txt", FILE_WRITE)) {
+    if (!file.open(F("LOG.txt"), FILE_WRITE)) {
       Serial.println(F("open file failed"));
     } else {
       file.println(dataString);
@@ -72,7 +94,7 @@ class AwLogging {
   }
 
   void buzzerCommand() {
-    Serial.println("Command melody");
+    Serial.println(F("Command melody"));
     tone(PIN_BUZZER, 1500, 200);
     delay(230);
     tone(PIN_BUZZER, 1000, 200);
