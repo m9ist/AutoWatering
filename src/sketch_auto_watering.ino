@@ -5,7 +5,6 @@
 #include <Ds1302.h>
 #include <EEPROM.h>
 #include <Pomp.h>
-#include <Pomp.h>
 #include <Screen.h>
 #include <Sensors.h>
 #include <State.h>
@@ -86,7 +85,6 @@ void setup() {
   initScreen(logger);
 
   sensors.init(logger, global_state);
-  sensors.init(logger, global_state);
   pomp.initPomp();
   pomp.updatePlantsState(global_state);
 
@@ -148,8 +146,6 @@ void processEspCommand(JsonDocument& doc) {
     int amount = doc[F("amountMl")];
     logger.buzzerCommand();
     waterPlant(id, amount);
-    logger.buzzerCommand();
-    waterPlant(id, amount);
     return;
   }
 
@@ -171,7 +167,6 @@ void processEspCommand(JsonDocument& doc) {
 
   if ((String)ESP_COMMAND_DAILY_TASK == command) {
     runDailyCommand();
-    runDailyCommand();
     return;
   }
 
@@ -180,10 +175,8 @@ void processEspCommand(JsonDocument& doc) {
 
 void loop() {
   wdt_reset();
-  wdt_reset();
   // сначала делаем дешевые операции, все дорогие делаем в конце функции
   comm.communicationTick();
-  wdt_reset();
   wdt_reset();
 
   if (comm.communicationHasMessage()) {
@@ -201,7 +194,7 @@ void loop() {
   }
 
   if (global_state.updated) {
-    logger.logFreeRam();
+    logFreeRam();
     JsonDocument toSend = serializeState(global_state);
     String out;
     logger.writeln((String)F("Expected string length ") +
@@ -212,7 +205,7 @@ void loop() {
     global_state.updated = false;
     // todo придумать более красивую схему обновления экрана
     loopScreen(global_state);
-    logger.logFreeRam();
+    logFreeRam();
     return;
   }
 
@@ -220,22 +213,16 @@ void loop() {
     if (pomp.isWaterNowButtonPressed(i)) {
       drawScreenMessage((String)F("Start water plant ") + i, logger);
       pomp.startWaterPlant(i, logger);
-      drawScreenMessage((String)F("Start water plant ") + i, logger);
-      pomp.startWaterPlant(i, logger);
 
       while (pomp.isWaterNowButtonPressed(i)) {
-        wdt_reset();
         wdt_reset();
       }
 
       String info = pomp.stopWaterPlant(i, logger);
       drawScreenMessage(info, logger);
-      String info = pomp.stopWaterPlant(i, logger);
-      drawScreenMessage(info, logger);
       // todo <<<<<< подумать как отказаться от этого, обдумать всю схему работы
       // с экраном
       delay(3000);
-      wdt_reset();
       wdt_reset();
 
       loopScreen(global_state);
@@ -246,7 +233,6 @@ void loop() {
   bool wasUpdate = pomp.updatePlantsState(global_state);
   if (wasUpdate) {
     stateUpdated();
-    saveStateEEPROM();
     saveStateEEPROM();
   }
 

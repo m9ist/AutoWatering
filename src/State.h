@@ -29,18 +29,13 @@ struct Plant {
   // включено ли растение PLANT_IS_OFF_USER - выключен тумблер ??? - отключение
   // по ошибке PLANT_IS_ON - включено
   uint8_t isOn = PLANT_IS_UNDEFINED;
-  uint8_t isOn = PLANT_IS_UNDEFINED;
   // краткое описание растения (горшок, название и тд)
-  char plantName[10] = "";
   char plantName[10] = "";
   // сколько в процентах влажности 0..99
   uint8_t parrots = 0;
-  uint8_t parrots = 0;
   // оригинальная влажность от датчика влажности
   uint16_t originalValue = UNDEFINED_PLANT_VALUE;
-  uint16_t originalValue = UNDEFINED_PLANT_VALUE;
 
-  uint16_t dailyAmountMl = 0;
   uint16_t dailyAmountMl = 0;
 };
 
