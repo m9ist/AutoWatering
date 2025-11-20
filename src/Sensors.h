@@ -13,51 +13,12 @@
 #define PIN_TEMP_SDA 19
 #define PIN_TEMP_SCL 21
 
-#define PIN_WATER_FLOW_SENSOR 2
-
-// Объявляем переменную для хранения частоты импульсов (Гц).
-volatile uint16_t varF = 0;
-void funCountInt() { varF++; }
+#define PIN_WATER_LEVEL A1
 
 class Sensors {
  protected:
-  // Объявляем переменную для хранения времени последнего расчёта.
-  uint32_t varTime = 0;
-  // Объявляем переменную для хранения рассчитанной скорости потока воды (мл/с).
-  float varQ = 0;
-  // Объявляем переменную для хранения рассчитанного объема воды (мл).
-  float varV = 0;
-
-  int loopId = 0;
-
-  int measure_time = 10;
-
   SoftwareWire wireTempSensor = SoftwareWire(PIN_TEMP_SDA, PIN_TEMP_SCL);
   SHT31_SWW sht31 = SHT31_SWW(0x44, &wireTempSensor);
-
-  void loopWaterFlowSensor(AwLogging& logger) {
-    //   Если прошла 1 секунда:
-    // Если c момента последнего расчёта прошла 1 секунда,
-    //  Определяем скорость и расход воды:
-    // или произошло переполнение millis то ...
-    if ((varTime + 1000) < millis() || varTime > millis()) {
-      // Сбрасываем частоту импульсов датчика, значение этой переменной
-      // приращается по прерываниям.
-      uint32_t varTmp = varF;
-      varF = 0;
-
-      // Определяем скорость потока воды мл/с.
-      // todo добавить нормировку по милисекундам
-      varQ = varTmp * 1000.0f / ((float)varTmp * 5.9f + 4570.0f);
-      // Сохраняем  время последних вычислений.
-      varTime = millis();
-      // Определяем объем воды мл.
-      varV += varQ;
-      // Выводим рассчитанные данные:
-      logger.writeln((String) F("Объем ") + varV + F("мл, скорость ") +
-                     (varQ * 60.0f) + F("мл/м."));
-    }
-  }
 
   void loopSoilMoistureSensors(State& state) {
     for (int i = 0; i < PLANTS_AMOUNT; i++) {
@@ -82,20 +43,13 @@ class Sensors {
     logger.writeln((String)F("SHT31 connection: ") + b);
     state.temperatureSensorInited = b;
 
-    // работа с датчиком кол-ва воды
-    pinMode(PIN_WATER_FLOW_SENSOR, INPUT);
-    uint8_t intSensor = digitalPinToInterrupt(PIN_WATER_FLOW_SENSOR);
-    attachInterrupt(intSensor, funCountInt, RISING);
-    if (intSensor < 0) {
-      // todo добавить в ошибки
-      logger.writeln(F("!!!!!!!!!!!!!Указан вывод без EXT INT"));
-    }
-
     // схема с мультиплексором для датчиков влажности почвы
     pinMode(PIN_SERNSOR_S0, OUTPUT);  // s0
     pinMode(PIN_SERNSOR_S1, OUTPUT);  // s1
     pinMode(PIN_SERNSOR_S2, OUTPUT);
     pinMode(PIN_SERNSOR_S3, OUTPUT);
+
+    pinMode(PIN_WATER_LEVEL, INPUT);
 
     // 1 датчик на 1 выходе - через плату HW-080 ... 410 показания
     // неподключенные 1023- проблемы с землей 2 датчик на 4 выходе - v 1.2 3
@@ -114,11 +68,13 @@ class Sensors {
 
   void loopSensors(AwLogging& logger, State& state) {
     logger.writeln(F("Start loop sensors."));
-    loopWaterFlowSensor(logger);
     loopSoilMoistureSensors(state);
     sht31.read(false);
     state.temperature = sht31.getTemperature();
     state.humidity = sht31.getHumidity();
+
+    int waterLevel = digitalRead(PIN_WATER_LEVEL);
+    // state.hasWaterLevel = waterLevel == HIGH;
   }
 };
 

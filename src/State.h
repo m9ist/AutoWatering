@@ -48,6 +48,7 @@ struct State {
   bool pompIsOn = false;
   bool espConnectedAndTimeSynced = false;
   bool temperatureSensorInited = false;
+  // bool hasWaterLevel = false;
 
   int freeMemorySize = 0;
 

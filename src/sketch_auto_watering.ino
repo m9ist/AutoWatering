@@ -12,8 +12,6 @@
 #include <Timer.h>
 #include <avr/wdt.h>
 
-#include <avr/wdt.h>
-
 #define IS_DEBUG true
 
 // Alt + Shift + F - автоформатирование кода
@@ -85,7 +83,7 @@ void setup() {
   initScreen(logger);
 
   sensors.init(logger, global_state);
-  pomp.initPomp();
+  pomp.initPomp(logger);
   pomp.updatePlantsState(global_state);
 
   timerSensorsCheck.setDuration(Timer::Seconds(5));
@@ -106,7 +104,7 @@ void sendTelegram(String message) {
 }
 
 void waterPlant(int id, int amount) {
-  String info = pomp.waterPlant(id, amount);
+  String info = pomp.waterPlant(id, amount, logger);
   logFreeRam();
   sendTelegram(info);
   delay(10);
@@ -123,7 +121,7 @@ void runDailyCommand() {
     }
     waterPlant(i, plant.dailyAmountMl);
   }
-  sendTelegram(F("Daily task is completed."));
+  sendTelegram((String)F("Daily task is completed. Free mem = ") + freeRam());
 }
 
 void processEspCommand(JsonDocument& doc) {
@@ -212,13 +210,16 @@ void loop() {
   for (int i = 0; i < 16; i++) {
     if (pomp.isWaterNowButtonPressed(i)) {
       drawScreenMessage((String)F("Start water plant ") + i, logger);
+      pomp.beforeLoopFlowSensor();
       pomp.startWaterPlant(i, logger);
 
       while (pomp.isWaterNowButtonPressed(i)) {
         wdt_reset();
+        pomp.loopFlowSensor();
       }
 
       String info = pomp.stopWaterPlant(i, logger);
+      logger.writeln((String)F("ml spend: ") + pomp.getWaterFlowSensorMl());
       drawScreenMessage(info, logger);
       // todo <<<<<< подумать как отказаться от этого, обдумать всю схему работы
       // с экраном

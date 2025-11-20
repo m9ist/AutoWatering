@@ -1,4 +1,5 @@
 #include <AwLogging.h>
+#include <FlowSensor.h>
 #include <State.h>
 #include <avr/wdt.h>
 
@@ -18,6 +19,13 @@
 #define PIN_POMP 35
 #define PIN_POMP_TURN_ON 17
 
+#define PIN_WATER_FLOW_SENSOR 2
+#define WATER_FLOW_ITERATION_MS 100
+
+// YFS401
+FlowSensor flowSensor = FlowSensor(2813, PIN_WATER_FLOW_SENSOR);
+void waterFlowCount() { flowSensor.count(); }
+
 class Pomp {
  private:
   bool pompState = false;
@@ -25,6 +33,8 @@ class Pomp {
   int plantsToButton[PLANTS_AMOUNT] = {1, 3, 5, 7, 8, 10, 12, 14,
                                        0, 2, 4, 6, 9, 11, 13, 15};
   unsigned long timeCheck;
+  unsigned long pompLoopStart;
+  unsigned long pompLoopNextCheck;
 
   void startPomp(AwLogging& logger) {
     logger.writeln(F("Start pomp"));
@@ -98,7 +108,7 @@ class Pomp {
   Pomp(/* args */) {};
   ~Pomp() {};
 
-  void initPomp() {
+  void initPomp(AwLogging& logger) {
     pinMode(PIN_POMP, OUTPUT);
 
     pinMode(PIN_REGISTER_CS, OUTPUT);
@@ -114,6 +124,14 @@ class Pomp {
     pinMode(PIN_MULTIPLEXER_WATER_NOW_SIG, INPUT_PULLUP);
 
     pinMode(PIN_POMP_TURN_ON, INPUT_PULLUP);
+
+    // работа с датчиком кол-ва воды
+    uint8_t intSensor = digitalPinToInterrupt(PIN_WATER_FLOW_SENSOR);
+    if (intSensor < 0) {
+      // todo добавить в ошибки
+      logger.writeln(F("!!!!!!!!!!!!!Указан вывод без EXT INT"));
+    }
+    flowSensor.begin(waterFlowCount);
   }
 
   // обновляет включено ли юзером растение на тумблере
@@ -167,15 +185,69 @@ class Pomp {
     stopPomp(logger);
     turnOffValve(id, logger);
 
+    // todo придумать схему покрасивее <<<<<<<<<<<<<<<<<<<<
     timeCheck = millis() - timeCheck;
     String out =
         (String)F("End watering plant ") + id + F(" in ") + timeCheck + F("ms");
     return out;
   }
 
-  String waterPlant(int id, int amounMl) {
+  void beforeLoopFlowSensor() {
+    flowSensor.read();
+    flowSensor.resetVolume();
+    flowSensor.resetPulse();
+    pompLoopStart = millis();
+    // считаем, что поток воды будет какое-то время разгоняться
+    pompLoopNextCheck = pompLoopStart + 100;
+  }
+
+  void loopFlowSensor() {
+    if (millis() < pompLoopStart) {
+      // реализация в библиотеке не готова к этому, мы можем только обнулить
+      beforeLoopFlowSensor();
+      return;
+    }
+    if (millis() < pompLoopNextCheck) {
+      return;
+    }
+    if (millis() - pompLoopStart < 400) {
+      pompLoopNextCheck = millis() + 100;
+    } else {
+      pompLoopNextCheck = millis() + 1000;
+    }
+    flowSensor.read();
+  }
+
+  float getWaterFlowSensorMl() {
+    flowSensor.read();
+    return flowSensor.getVolume() * 1000;
+  }
+
+  String waterPlant(int id, int amounMl, AwLogging& logger) {
     wdt_reset();
-    return (String)F("Done task water plant ") + id + F(" with ") + amounMl +
-           F("ml. Did nothing!!!");
+    float practicalSpeedMlInMs = 0.0077;
+    // сколько итераций по 0.1 сек нужно сделать
+    int expectedNumIterations =
+        (float)amounMl / practicalSpeedMlInMs / WATER_FLOW_ITERATION_MS;
+    logger.writeln((String)F("Num iterations = ") + expectedNumIterations);
+    beforeLoopFlowSensor();
+    unsigned long start = millis();
+    startWaterPlant(id, logger);
+
+    for (int iter = 0; iter < expectedNumIterations; iter++) {
+      while (start + WATER_FLOW_ITERATION_MS > millis() && start <= millis()) {
+      }
+      loopFlowSensor();
+      wdt_reset();
+      start = millis();
+    }
+
+    stopWaterPlant(id, logger);
+    float ml = getWaterFlowSensorMl();
+
+    return (String)F("Done water id ") + id + F(" with ") + amounMl +
+           F("ml. Spend ~") +
+           (expectedNumIterations * WATER_FLOW_ITERATION_MS) +
+           F("ms. \"Real\" water spend ml = ") + ml;
   }
 };
