@@ -178,11 +178,17 @@ class Pomp {
     logger.writeln((String)F("Watering plant ") + id);
     timeCheck = millis();
     turnOnValve(id, logger);
+    // todo придумать более корректную схему <<<<<<<
+    // сделано, чтобы не создавать напряжение на клапанах
+    delay(200);
     startPomp(logger);
   }
 
   String stopWaterPlant(int id, AwLogging& logger) {
     stopPomp(logger);
+    // todo придумать более корректную схему <<<<<<<
+    // сделано, чтобы не создавать напряжение на клапанах
+    delay(200);
     turnOffValve(id, logger);
 
     // todo придумать схему покрасивее <<<<<<<<<<<<<<<<<<<<

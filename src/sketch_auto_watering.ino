@@ -52,7 +52,9 @@ void saveStateEEPROM() {
   EEPROM.put(address, version);
   address += sizeof(int);
   EEPROM.put(address, global_state);
-  logger.writeln("Saved state to eeprom");
+#ifdef DEBUG_LOG
+  logger.writeln(F("Saved state to eeprom"));
+#endif
 }
 
 int freeRam() {
@@ -98,7 +100,9 @@ void sendTelegram(String message) {
   toSend[F("message")] = (String)F("Arduino: ") + message;
   String out;
   serializeJson(toSend, out);
+#ifdef DEBUG_LOG
   logger.writeln(out);
+#endif
   comm.communicationSendMessage(out);
   logFreeRam();
 }
@@ -168,7 +172,9 @@ void processEspCommand(JsonDocument& doc) {
     return;
   }
 
+#ifdef DEBUG_LOG
   logger.writeln((String)F("Unknown command ") + command);
+#endif
 }
 
 void loop() {
@@ -179,7 +185,9 @@ void loop() {
 
   if (comm.communicationHasMessage()) {
     String message = comm.communicationGetMessage();
+#ifdef DEBUG_LOG
     logger.writeln(message);
+#endif
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, message);
     if (error != DeserializationError::Ok) {
@@ -195,10 +203,14 @@ void loop() {
     logFreeRam();
     JsonDocument toSend = serializeState(global_state);
     String out;
+#ifdef DEBUG_LOG
     logger.writeln((String)F("Expected string length ") +
                    (measureJson(toSend) + 1));
+#endif
     serializeJson(toSend, out);
+#ifdef DEBUG_LOG
     logger.writeln(out);
+#endif
     comm.communicationSendMessage(out);
     global_state.updated = false;
     // todo придумать более красивую схему обновления экрана
@@ -240,14 +252,13 @@ void loop() {
   if (timerSensorsCheck.expired()) {
     timerSensorsCheck.setDuration(repeatIntervalSensorsCheck);
     sensors.loopSensors(logger, global_state);
+    global_state.lastSensorCheck = awClock.getNow();
     stateUpdated();
     return;
   }
 
   if (isCheckButtonPressed()) {
-    runDailyCommand();
-  }
-  if (isCheckButtonPressed()) {
-    runDailyCommand();
+    sensors.tmpLoop(global_state);
+    return;
   }
 }

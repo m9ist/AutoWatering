@@ -22,7 +22,7 @@
 #define ARDUINO_COMMAND_STATE F("state")
 #define ARDUINO_SEND_TELEGRAM F("arduino_tg")
 
-#define EEPROM_VERSION 4
+#define EEPROM_VERSION 5
 
 // Изменил, обнови EEPROM_VERSION
 struct Plant {
@@ -31,8 +31,6 @@ struct Plant {
   uint8_t isOn = PLANT_IS_UNDEFINED;
   // краткое описание растения (горшок, название и тд)
   char plantName[10] = "";
-  // сколько в процентах влажности 0..99
-  uint8_t parrots = 0;
   // оригинальная влажность от датчика влажности
   uint16_t originalValue = UNDEFINED_PLANT_VALUE;
 
@@ -123,7 +121,6 @@ JsonDocument serializeState(State state) {
     out[F("p")][id][F("on")] = state.plants[i].isOn;
     // out[F("p")][id][F("d")] = state.plants[i].plantName;
     // out[F("p")][id][F("d")] = state.plants[i].plantName;
-    out[F("p")][id][F("p")] = state.plants[i].parrots;
     out[F("p")][id][F("or")] = state.plants[i].originalValue;
     out[F("p")][id][F("m")] = state.plants[i].dailyAmountMl;
     id++;
@@ -150,7 +147,6 @@ State deserializeState(JsonDocument doc) {
     // const char* plantName = doc[F("p")][i][F("d")];
     // strlcpy(out.plants[id].plantName, plantName,
     //         sizeof(out.plants[id].plantName));
-    out.plants[id].parrots = doc[F("p")][i][F("p")];
     out.plants[id].originalValue = doc[F("p")][i][F("or")];
     out.plants[id].dailyAmountMl = doc[F("p")][i][F("m")];
   }

@@ -57,7 +57,7 @@ Timer timerStateSendIot;
 const Duration repeatIntervalStateSendIot = Timer::Minutes(30);
 bool stateRecievedIot = false;
 Timer timerStateSendTelegram;
-const Duration repeatIntervalStateSendTelegram = Timer::Hours(2);
+const Duration repeatIntervalStateSendTelegram = Timer::Hours(1);
 bool stateRecievedTelegram = false;
 
 // полученный из ардуино стейт
@@ -83,6 +83,7 @@ String getTimestamp() {
 }
 
 void serialLog(const String& command, const String& s) {
+#ifdef DEBUG_LOG
   JsonDocument json;
   json[COMMAND_KEY] = command;
   json[F("timestamp")] = getTimestamp();
@@ -92,6 +93,7 @@ void serialLog(const String& command, const String& s) {
   serializeJson(json, sendJson);
   logger.println(sendJson);
   comm.communicationSendMessage(sendJson);
+#endif
 }
 
 void serialLog(const String& s) { serialLog(ESP_COMMAND_LOG, s); }
@@ -463,7 +465,7 @@ void processMessageArduino(String message) {
       time_t now = time(nullptr);
       point.time = now;
       for (int i = 0; i < PLANTS_AMOUNT; i++) {
-        point.pp[i] = lastState.plants[i].parrots;
+        point.pp[i] = lastState.plants[i].originalValue;
       }
       if (numPlotPoints == NUM_PLOT_POINTS) {
         for (int i = 0; i < NUM_PLOT_POINTS - 1; i++) {
@@ -517,7 +519,7 @@ void loop() {
 
   if (timerStateSendTelegram.expired() && stateRecievedTelegram) {
     stateRecievedTelegram = false;
-    serialLog("Send state to telegram");
+    serialLog(F("Send state to telegram"));
 
     timerStateSendTelegram.setDuration(repeatIntervalStateSendTelegram);
     JsonDocument des = serializeState(lastState);

@@ -44,10 +44,11 @@ class AwLogging {
     }
     Serial.println(F("Start init logging..."));
     SoftSpiDriver<SD_MISO_PIN, SD_MOSI_PIN, SD_SCK_PIN> softSpi;
+    delay(500);
     SdSpiConfig sd_config =
         SdSpiConfig(SD_CS_PIN, DEDICATED_SPI, SD_SCK_MHZ(0), &softSpi);
+    delay(100);
     SdFs sd;
-    file = FsFile();
     if (!sd.begin(sd_config)) {
       sd.initErrorPrint();
       return;
@@ -58,8 +59,9 @@ class AwLogging {
     Serial.println(F("SD is inited."));
   }
 
-  void logFreeRam(int freeRam) { 
-    snprintf(freeRamLogginBuffer, sizeof(freeRamLogginBuffer), "Free RAM: %d", freeRam);
+  void logFreeRam(int freeRam) {
+    snprintf(freeRamLogginBuffer, sizeof(freeRamLogginBuffer), "Free RAM: %d",
+             freeRam);
     Serial.println(freeRamLogginBuffer);
     if (SD_TURNED_OFF || !_sdIsInited) {
       return;

@@ -6,6 +6,8 @@
 #include <Arduino.h>
 #include <Timer.h>
 
+#define DEBUG_LOG
+
 class Communication {
  protected:
 #define STATE_START_COMMUNICATION_SEND 1
@@ -53,12 +55,14 @@ class Communication {
   void readMessageAfterCommunicationStart();
   bool timeOut(String ret) {
     if (state == COMMUNICATION_TIME_OUT) {
+#ifdef DEBUG_LOG
       if (ret.length() > 0) {
         log.print(F("Got timeout status with message: "));
         log.println(ret);
       } else {
         log.println(F("Got timeout status"));
       }
+#endif
       return true;
     }
     return false;

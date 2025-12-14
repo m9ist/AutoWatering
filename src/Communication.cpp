@@ -26,8 +26,10 @@ String Communication::readNextChunk() {
     ret += (char)read;
   }
   if (ctn == COMMUNICATION_TIME_OUT_CTN) {
+#ifdef DEBUG_LOG
     log.print(F("got communication time out on "));
     log.println(ret);
+#endif
     state = STATE_TIMEOUT;
   }
   return ret;
@@ -90,12 +92,14 @@ void Communication::communicationTick() {
   //************ произошел тайм аут, посылаем привет и вычитываем все до привета
   if (state != STATE_AWAIT) {
     if (timerHellowWorldSend.expired()) {
+#ifdef DEBUG_LOG
       log.print(F("Send hellow world, read queue="));
       log.print(queueReadSize);
       log.print(F(" write queue="));
       log.print(queueWriteSize);
       log.print(F(" state="));
       log.println(state);
+#endif
       serial.print(COMMUNICATION_HELLOW);
       timerHellowWorldSend.setDuration(intervalHellowWorldSend);
     }
@@ -125,10 +129,13 @@ void Communication::communicationTick() {
         if (lookStartIdPos == sizeof(COMMUNICATION_HELLOW) - 1) {
           // отловили старт коммуникаций
           state = STATE_AWAIT;
+#ifdef DEBUG_LOG
           log.println(F("Got hellow world, commucation enter normal mode."));
+#endif
           return;
         }
         if (read == '\n' && lookStartIdPos == 0) {
+#ifdef DEBUG_LOG
           ret.trim();
           if (ret.length() > 0) {
             log.print(F("State = "));
@@ -137,12 +144,14 @@ void Communication::communicationTick() {
             log.print(ret);
             log.println(F("__"));
           }
+#endif
           return;
         }
         ret += (char)read;
       }
       delay(10);
     }
+#ifdef DEBUG_LOG
     ret.trim();
     if (ret.length() > 0) {
       log.print(F("State = "));
@@ -151,8 +160,10 @@ void Communication::communicationTick() {
       log.print(ret);
       log.println(F("__"));
     }
+#endif
     return;
   } else {
+#ifdef DEBUG_LOG
     if (queueReadSize > 0 || queueWriteSize > 0) {
       log.print(F("read queue="));
       log.print(queueReadSize);
@@ -161,6 +172,7 @@ void Communication::communicationTick() {
       log.print(F(" state="));
       log.println(state);
     }
+#endif
   }
 
   //************ сначала вычитываем сообщения на вход
@@ -169,8 +181,10 @@ void Communication::communicationTick() {
     String ret = readNextChunk();
     if (timeOut(ret)) return;
     if (ret != COMMUNICATION_START) {
+#ifdef DEBUG_LOG
       log.print(F("Got unexpected (not start) message "));
       log.println(ret);
+#endif
       state = STATE_FAILED;
       return;
     }
@@ -189,17 +203,23 @@ void Communication::communicationTick() {
     if (timeOut(ret)) return;
     // сначала проверим конфликт ситуации, когда оба пытаются стартануть общение
     if (ret == COMMUNICATION_START) {
+#ifdef DEBUG_LOG
       log.println(F("Got conflict on communication start"));
+#endif
       if (_readFirst) {
         // если мы прогинаемся, то заходим в функцию чтения сообщения
         state = STATE_READ;
+#ifdef DEBUG_LOG
         log.println(F("Enter read mode"));
+#endif
         readMessageAfterCommunicationStart();
         return;
       } else {
-        // если же мы гнем свою линию, то мы снова читаем следующий токен (нода
-        // "прогинается", поэтому она должна прислать готовность читать)
+// если же мы гнем свою линию, то мы снова читаем следующий токен (нода
+// "прогинается", поэтому она должна прислать готовность читать)
+#ifdef DEBUG_LOG
         log.println(F("reread next token, await read"));
+#endif
         ret = readNextChunk();
         if (timeOut(ret)) return;
       }
@@ -235,8 +255,10 @@ void Communication::communicationTick() {
     if (ret == COMMUNICATION_END) {
       state = STATE_AWAIT;
     } else {
+#ifdef DEBUG_LOG
       log.print(F("State failed after message send, got unexpected message: "));
       log.println(ret);
+#endif
       state = STATE_FAILED;
     }
 
@@ -246,12 +268,16 @@ void Communication::communicationTick() {
 
 // добавляем в исходящую очередь сообщений на отправку
 void Communication::communicationSendMessage(String message) {
+#ifdef DEBUG_LOG
   log.println(F("Got new message to send"));
+#endif
   int pos;
   if (queueWriteSize == COMMUNICATION_OUT_MESSAGES_LENGTH) {
-    // перезатираем сообщение, которое стоит первым со сдвигом позиции
+// перезатираем сообщение, которое стоит первым со сдвигом позиции
+#ifdef DEBUG_LOG
     log.print(F("Full queue, rewrite first element: "));
     log.println(queueWrite[queueWritePos]);
+#endif
     pos = queueWritePos;
     queueWritePos = (queueWritePos + 1) % COMMUNICATION_OUT_MESSAGES_LENGTH;
   } else {

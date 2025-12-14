@@ -29,7 +29,6 @@ class Sensors {
       // delay(50);
       int read = analogRead(PIN_UNPUT_SENSOR);
       state.plants[i].originalValue = read;
-      state.plants[i].parrots = constrain(map(read, 950, 350, 0, 100), 0, 99);
     }
   }
 
@@ -67,7 +66,9 @@ class Sensors {
   }
 
   void loopSensors(AwLogging& logger, State& state) {
+#ifdef DEBUG_LOG
     logger.writeln(F("Start loop sensors."));
+#endif
     loopSoilMoistureSensors(state);
     sht31.read(false);
     state.temperature = sht31.getTemperature();
@@ -75,6 +76,22 @@ class Sensors {
 
     int waterLevel = digitalRead(PIN_WATER_LEVEL);
     // state.hasWaterLevel = waterLevel == HIGH;
+  }
+
+  void tmpLoop(State& state) {
+    loopSoilMoistureSensors(state);
+    Serial.print(F("plants:"));
+    for (int i = 0; i < PLANTS_AMOUNT; i++) {
+      Plant p = state.plants[i];
+      if (p.isOn != PLANT_IS_ON) {
+        continue;
+      }
+      Serial.print(' ');
+      Serial.print(i);
+      Serial.print('=');
+      Serial.print(p.originalValue);
+    }
+    Serial.println();
   }
 };
 
@@ -94,4 +111,6 @@ class Sensors {
 576;804;626;761 15:17:13
 593;808;608;813 16:32:34
 573;608;581;634 17:48:17
+
+0.670 2.684 3.679 4.670 5.680  через час после поливки
 */

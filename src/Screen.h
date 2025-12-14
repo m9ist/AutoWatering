@@ -11,8 +11,9 @@ LCD without CS) #06 DC  -> D10/PA1 or any digital #07 BLK -> NC
 
 #include <Adafruit_GFX.h>
 #include <SPI.h>
-#include "ST7789_AVR.h"
+
 #include "AwLogging.h"
+#include "ST7789_AVR.h"
 
 #define CS_ALWAYS_LOW
 #define COMPATIBILITY_MODE
@@ -93,9 +94,13 @@ void loopScreen(State& globalState) {
   lcd.println('%');
 
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
-  lcd.println(F("Next task runing"));
-  lcd.setCursor(stepx, stepy + lineHeight * lineId++);
-  lcd.println(dateToString(globalState.nextTaskRuning));
+  lcd.print(F("Free memory: "));
+  lcd.println(globalState.freeMemorySize);
+
+  // lcd.setCursor(stepx, stepy + lineHeight * lineId++);
+  // lcd.println(F("Next task runing"));
+  // lcd.setCursor(stepx, stepy + lineHeight * lineId++);
+  // lcd.println(dateToString(globalState.nextTaskRuning));
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
   lcd.println(F("Start app date"));
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
@@ -107,7 +112,7 @@ void loopScreen(State& globalState) {
     out += ';';
     out += i;
     out += '=';
-    out += globalState.plants[i].parrots;
+    out += globalState.plants[i].originalValue;
   }
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
   lcd.println(out);
