@@ -1,7 +1,8 @@
 // 3 дня раз для замеров раз в repeatIntervalStateSendIot
 #define NUM_PLOT_POINTS 6
 #define TURN_ON_TELEGRAM
-// #define TURN_ON_GYVER
+#define TURN_ON_GYVER
+// #define WITHOUT_ARDUINO
 
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
@@ -43,6 +44,10 @@ UniversalTelegramBot telegramBot(getTelegramBotToken(), espClient);
 String telegramChatId = "-5065686553";
 Timer timerTelegramCheck;
 const Duration repeatTelegramCheck = Timer::Seconds(10);
+
+#define GRAPH_HEIGHT 10
+#define GRAPH_LENGHT_MAX 40
+#define GRAPH_LABELS 5
 #endif
 
 #ifdef TURN_ON_GYVER
@@ -91,8 +96,12 @@ void serialLog(const String& command, const String& s) {
 
   String sendJson;
   serializeJson(json, sendJson);
+#ifdef WITHOUT_ARDUINO
+  Serial.println(sendJson);
+#else
   logger.println(sendJson);
   comm.communicationSendMessage(sendJson);
+#endif
 #endif
 }
 
@@ -146,7 +155,9 @@ void logTelegram(String message) {
 #ifdef TURN_ON_TELEGRAM
   telegramBot.sendMessage(telegramChatId, getTimestamp() + F(": ") + message,
                           "");
-  serialLog((String)F("Send telegram: ") + message);
+  if (message.length() < 100) {
+    serialLog((String)F("Send telegram: ") + message);
+  }
 #endif
 }
 
@@ -194,6 +205,8 @@ void setupWifiClient() {
   serialLog(F("Setup secure wifi..."));
   // BearSSL::X509List xYa(ya_sert);
   // espClient.setTrustAnchors(&xYa);
+  espClient.setTimeout(15000);
+  espClient.setBufferSizes(4096, 4096);
   espClient.setInsecure();
   BearSSL::X509List x509(publicCert().c_str());
   BearSSL::PrivateKey* privKey = new BearSSL::PrivateKey(privateCert().c_str());
@@ -264,14 +277,21 @@ void setupOTA() {
   ArduinoOTA.begin();
 }
 
+#ifdef TURN_ON_TELEGRAM
 bool isValidInteger(String str) {
   if (str.length() == 0) return false;
-  for (int i = 0; i < str.length(); i++) {
+  for (unsigned int i = 0; i < str.length(); i++) {
     if (!isDigit(str.charAt(i))) {
       return false;
     }
   }
   return true;
+}
+
+String getGrapghString() {
+  String out;
+
+  return out;
 }
 
 void procesTelegramMessage(String message) {
@@ -290,8 +310,15 @@ void procesTelegramMessage(String message) {
     return;
   }
 
+  if (message == F("/graphs")) {
+    serialLog(ESP_COMMAND_LOG, F("Got graph command"));
+    String g = getGrapghString();
+    logTelegram(g);
+    return;
+  }
+
   if (message == F("/daily")) {
-    serialLog(ESP_COMMAND_DAILY_TASK, "From telegram");
+    serialLog(ESP_COMMAND_DAILY_TASK, F("From telegram"));
     return;
   }
 
@@ -333,10 +360,12 @@ void procesTelegramMessage(String message) {
     return;
   }
 }
+#endif
 
 void loopTelegram() {
   if (!timerTelegramCheck.expired()) return;
   timerTelegramCheck.setDuration(repeatTelegramCheck);
+  serialLog(F("Telegram check"));
 
 #ifdef TURN_ON_TELEGRAM
   int numNewMessages =
@@ -363,12 +392,12 @@ void loopTelegram() {
 }
 
 void setup() {
-  if (true) {
-    Serial.begin(115200);  // для общения с ардуино
-  } else {
-    Serial.begin(9600);  // для отладки
-    delay(3000);
-  }
+#ifdef WITHOUT_ARDUINO
+  Serial.begin(9600);  // для отладки
+  delay(3000);
+#else
+  Serial.begin(115200);  // для общения с ардуино
+#endif
   while (!Serial) {
   }
 
@@ -396,6 +425,10 @@ void setup() {
   sett.begin();
   sett.onBuild(build);
   sett.onUpdate(updateSettings);
+#endif
+
+#ifdef TURN_ON_TELEGRAM
+  // telegramBot.longPoll = 20;
 #endif
 
   timerStateSendIot.setDuration(repeatIntervalStateSendIot);
@@ -475,16 +508,6 @@ void processMessageArduino(String message) {
       }
       lastPlotPoints[numPlotPoints] = point;
       numPlotPoints++;
-
-      if (false) {
-        // в случае если нужна отладка того, что десериализовалось
-        JsonDocument des = serializeState(state);
-        String outJson;
-        serializeJson(des, outJson);
-        serialLog((String)F("Deserialized (and serialized): ") + outJson);
-      } else {
-        serialLog(F("Processed new state"));
-      }
     } else if ((String)ARDUINO_SEND_TELEGRAM == command) {
       const char* message = doc[F("message")];
       logTelegram(message);

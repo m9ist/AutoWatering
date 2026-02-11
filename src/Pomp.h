@@ -16,14 +16,19 @@
 #define PIN_MULTIPLEXER_WATER_NOW_SIG 20
 #define PIN_MULTIPLEXER_PLANT_TURN_ON_SIG 18
 
-#define PIN_POMP 35
+#define PIN_POMP_MAIN 6
+#define PIN_POMP_SPARE 5
 #define PIN_POMP_TURN_ON 17
+
+#define POMP_SPEED_LOW 80
+#define POMP_SPEED_MEDIUM 140
+#define POMP_SPEED_HIGH 180
 
 #define PIN_WATER_FLOW_SENSOR 2
 #define WATER_FLOW_ITERATION_MS 100
 
-// YFS401
-FlowSensor flowSensor = FlowSensor(2813, PIN_WATER_FLOW_SENSOR);
+// YFS401 было 2813
+FlowSensor flowSensor = FlowSensor(YFS401, PIN_WATER_FLOW_SENSOR);
 void waterFlowCount() { flowSensor.count(); }
 
 class Pomp {
@@ -36,14 +41,24 @@ class Pomp {
   unsigned long pompLoopStart;
   unsigned long pompLoopNextCheck;
 
+  int currentPomp;
+
   void startPomp(AwLogging& logger) {
     logger.writeln(F("Start pomp"));
-    digitalWrite(PIN_POMP, HIGH);
+    // todo запрогать схему со сменой моторов
+    currentPomp = PIN_POMP_SPARE;
+    analogWrite(currentPomp, POMP_SPEED_LOW);
+    delay(30);
+    analogWrite(currentPomp, POMP_SPEED_MEDIUM);
+    delay(20);
+    analogWrite(currentPomp, POMP_SPEED_HIGH);
   }
 
   void stopPomp(AwLogging& logger) {
     logger.writeln(F("Stop pomp"));
-    digitalWrite(PIN_POMP, LOW);
+    analogWrite(currentPomp, POMP_SPEED_LOW);
+    delay(50);
+    digitalWrite(currentPomp, LOW);
   }
 
   void multiplexPlant(int id) {
@@ -109,7 +124,8 @@ class Pomp {
   ~Pomp() {};
 
   void initPomp(AwLogging& logger) {
-    pinMode(PIN_POMP, OUTPUT);
+    pinMode(PIN_POMP_MAIN, OUTPUT);
+    pinMode(PIN_POMP_SPARE, OUTPUT);
 
     pinMode(PIN_REGISTER_CS, OUTPUT);
     pinMode(PIN_REGISTER_DAT, OUTPUT);

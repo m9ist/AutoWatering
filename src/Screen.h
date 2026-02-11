@@ -72,7 +72,11 @@ uint16_t getBackground(bool isGood) { return isGood ? GREEN : RED; }
 
 // всего помещается 12 строчек, последняя с доп сдвигом на 5 пикселей
 void loopScreen(State& globalState) {
+#ifdef SD_TURNED_OFF
+  bool screenState = true;
+#elif
   bool screenState = globalState.sdInited;
+#endif
   uint16_t screenBack = getBackground(screenState);
   uint16_t screenFont = getFont(screenState);
   lcd.fillScreen(screenBack);

@@ -3,7 +3,7 @@
 #include "SdFat.h"
 #include "State.h"
 
-#define SD_TURNED_OFF false
+#define SD_TURNED_OFF true
 
 #define PIN_BUZZER 47
 

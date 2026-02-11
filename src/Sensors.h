@@ -8,7 +8,7 @@
 #define PIN_SERNSOR_S2 30
 #define PIN_SERNSOR_S3 32
 
-#define PIN_UNPUT_SENSOR 0
+#define PIN_INPUT_SENSOR 0
 
 #define PIN_TEMP_SDA 19
 #define PIN_TEMP_SCL 21
@@ -27,7 +27,7 @@ class Sensors {
       digitalWrite(PIN_SERNSOR_S2, bitRead(i, 2));
       digitalWrite(PIN_SERNSOR_S3, bitRead(i, 3));
       // delay(50);
-      int read = analogRead(PIN_UNPUT_SENSOR);
+      int read = analogRead(PIN_INPUT_SENSOR);
       state.plants[i].originalValue = read;
     }
   }
