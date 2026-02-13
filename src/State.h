@@ -100,8 +100,6 @@ bool isDefined(Plant plant) {
   // todo <<<<<< когда будут ошибки учесть их
   return plant.isOn == PLANT_IS_ON;
   //|| plant.originalValue < UNDEFINED_PLANT_VALUE || plant.plantName != "";
-  return plant.isOn == PLANT_IS_ON;
-  //|| plant.originalValue < UNDEFINED_PLANT_VALUE || plant.plantName != "";
 }
 
 JsonDocument serializeState(State state) {

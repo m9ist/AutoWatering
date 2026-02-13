@@ -1,5 +1,5 @@
 // 3 дня раз для замеров раз в repeatIntervalStateSendIot
-#define NUM_PLOT_POINTS 6
+#define NUM_PLOT_POINTS 48
 #define TURN_ON_TELEGRAM
 #define TURN_ON_GYVER
 // #define WITHOUT_ARDUINO
@@ -9,6 +9,7 @@
 #include <Communication.h>
 #include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
+#include <Graph.h>
 #ifdef TURN_ON_GYVER
 #include <SettingsGyver.h>
 #else
@@ -70,9 +71,10 @@ State lastState;
 
 struct PlotPoint {
   uint32_t time;
-  unsigned char pp[PLANTS_AMOUNT];
+  uint16_t pp[PLANTS_AMOUNT];
 };
 int numPlotPoints = 0;
+int numPlants = 0;
 PlotPoint lastPlotPoints[NUM_PLOT_POINTS];
 
 Communication comm = Communication(Serial, logger, true);
@@ -153,11 +155,10 @@ void logTelegram(String message) {
   if (telegramChatId == "") return;
 
 #ifdef TURN_ON_TELEGRAM
-  telegramBot.sendMessage(telegramChatId, getTimestamp() + F(": ") + message,
-                          "");
   if (message.length() < 100) {
     serialLog((String)F("Send telegram: ") + message);
   }
+  telegramBot.sendMessage(telegramChatId, getTimestamp() + F(": ") + message, F("Markdown"), 0);
 #endif
 }
 
@@ -172,26 +173,6 @@ void build(sets::Builder& b) {
     }
     b.endButtons();
   }
-}
-
-void updateSettings(sets::Updater& u) {
-  if (PLANTS_AMOUNT != 16) serialError(F("Plants amount not 16!"));
-  Table t(0, 16, cell_t::Uint32, cell_t::Int8, cell_t::Int8, cell_t::Int8,
-          cell_t::Int8, cell_t::Int8, cell_t::Int8, cell_t::Int8, cell_t::Int8,
-          cell_t::Int8, cell_t::Int8, cell_t::Int8, cell_t::Int8, cell_t::Int8,
-          cell_t::Int8, cell_t::Int8, cell_t::Int8);
-  for (int i = 0; i < numPlotPoints; i++) {
-    t.append(lastPlotPoints[i].time, lastPlotPoints[i].pp[0],
-             lastPlotPoints[i].pp[1], lastPlotPoints[i].pp[2],
-             lastPlotPoints[i].pp[3], lastPlotPoints[i].pp[4],
-             lastPlotPoints[i].pp[5], lastPlotPoints[i].pp[6],
-             lastPlotPoints[i].pp[7], lastPlotPoints[i].pp[8],
-             lastPlotPoints[i].pp[9], lastPlotPoints[i].pp[10],
-             lastPlotPoints[i].pp[11], lastPlotPoints[i].pp[12],
-             lastPlotPoints[i].pp[13], lastPlotPoints[i].pp[14],
-             lastPlotPoints[i].pp[15]);
-  }
-  u.updatePlot(H(run), t);
 }
 #endif
 
@@ -289,9 +270,15 @@ bool isValidInteger(String str) {
 }
 
 String getGrapghString() {
-  String out;
-
-  return out;
+  Graph graph = Graph(numPlants, numPlotPoints);
+  for (int i = 0; i < numPlotPoints; i++) {
+    for (int p = 0; p < PLANTS_AMOUNT; p++) {
+      if (lastPlotPoints[i].pp[p] < UNDEFINED_PLANT_VALUE) {
+        graph.addPoint(p, i, lastPlotPoints[i].pp[p]);
+      }
+    }
+  }
+  return graph.plot();
 }
 
 void procesTelegramMessage(String message) {
@@ -365,7 +352,6 @@ void procesTelegramMessage(String message) {
 void loopTelegram() {
   if (!timerTelegramCheck.expired()) return;
   timerTelegramCheck.setDuration(repeatTelegramCheck);
-  serialLog(F("Telegram check"));
 
 #ifdef TURN_ON_TELEGRAM
   int numNewMessages =
@@ -424,7 +410,7 @@ void setup() {
 #ifdef TURN_ON_GYVER
   sett.begin();
   sett.onBuild(build);
-  sett.onUpdate(updateSettings);
+  // sett.onUpdate(updateSettings);
 #endif
 
 #ifdef TURN_ON_TELEGRAM
@@ -497,8 +483,17 @@ void processMessageArduino(String message) {
       PlotPoint point;
       time_t now = time(nullptr);
       point.time = now;
+      int lNumPlants = 0;
       for (int i = 0; i < PLANTS_AMOUNT; i++) {
-        point.pp[i] = lastState.plants[i].originalValue;
+        if (isDefined(lastState.plants[i])) {
+          point.pp[i] = lastState.plants[i].originalValue;
+          lNumPlants++;
+        } else {
+          point.pp[i] = UNDEFINED_PLANT_VALUE;
+        }
+      }
+      if (lNumPlants > numPlants) {
+        numPlants = lNumPlants;
       }
       if (numPlotPoints == NUM_PLOT_POINTS) {
         for (int i = 0; i < NUM_PLOT_POINTS - 1; i++) {
