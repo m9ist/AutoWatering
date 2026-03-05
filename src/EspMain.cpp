@@ -76,6 +76,7 @@ struct PlotPoint {
 int numPlotPoints = 0;
 int numPlants = 0;
 PlotPoint lastPlotPoints[NUM_PLOT_POINTS];
+PointsHoler pointsHolder = PointsHoler(logger);
 
 Communication comm = Communication(Serial, logger, true);
 
@@ -158,7 +159,8 @@ void logTelegram(String message) {
   if (message.length() < 100) {
     serialLog((String)F("Send telegram: ") + message);
   }
-  telegramBot.sendMessage(telegramChatId, getTimestamp() + F(": ") + message, F("Markdown"), 0);
+  telegramBot.sendMessage(telegramChatId, getTimestamp() + F(": ") + message,
+                          F("Markdown"), 0);
 #endif
 }
 
@@ -270,7 +272,7 @@ bool isValidInteger(String str) {
 }
 
 String getGrapghString() {
-  Graph graph = Graph(numPlants, numPlotPoints);
+  Graph graph = Graph(numPlants, numPlotPoints, logger);
   for (int i = 0; i < numPlotPoints; i++) {
     for (int p = 0; p < PLANTS_AMOUNT; p++) {
       if (lastPlotPoints[i].pp[p] < UNDEFINED_PLANT_VALUE) {
@@ -423,6 +425,42 @@ void setup() {
   logTelegram(F("Esp started successfully."));
 }
 
+void gatherPoint() {
+  PlotPoint point;
+  time_t now = time(nullptr);
+  point.time = now;
+  int lNumPlants = 0;
+  for (int i = 0; i < PLANTS_AMOUNT; i++) {
+    point.pp[i] = UNDEFINED_PLANT_VALUE;
+  }
+  String info;
+  pointsHolder.dumpAvg([&](uint8_t plant, uint16_t avg) {
+    point.pp[plant] = avg;
+    lNumPlants++;
+    logger.print(F(", "));
+    logger.print(plant);
+    logger.print(F(" = "));
+    logger.print(avg);
+  });
+  if (lNumPlants > numPlants) {
+    numPlants = lNumPlants;
+  }
+  logger.print(F("Got point: "));
+  for (int i = 0; i < PLANTS_AMOUNT; i++) {
+    logger.print(point.pp[i]);
+    logger.print(',');
+  }
+  logger.println(';');
+  if (numPlotPoints == NUM_PLOT_POINTS) {
+    for (int i = 0; i < NUM_PLOT_POINTS - 1; i++) {
+      lastPlotPoints[i] = lastPlotPoints[i + 1];
+    }
+    numPlotPoints--;
+  }
+  lastPlotPoints[numPlotPoints] = point;
+  numPlotPoints++;
+}
+
 void sendMessageToIOT() {
   serialLog(F("Start sending message to iot..."));
   if (true) {
@@ -479,30 +517,11 @@ void processMessageArduino(String message) {
       stateRecievedIot = true;
       stateRecievedTelegram = true;
 
-      // подрисуем сразу точки на графике
-      PlotPoint point;
-      time_t now = time(nullptr);
-      point.time = now;
-      int lNumPlants = 0;
       for (int i = 0; i < PLANTS_AMOUNT; i++) {
         if (isDefined(lastState.plants[i])) {
-          point.pp[i] = lastState.plants[i].originalValue;
-          lNumPlants++;
-        } else {
-          point.pp[i] = UNDEFINED_PLANT_VALUE;
+          pointsHolder.addPoint(i, lastState.plants[i].originalValue);
         }
       }
-      if (lNumPlants > numPlants) {
-        numPlants = lNumPlants;
-      }
-      if (numPlotPoints == NUM_PLOT_POINTS) {
-        for (int i = 0; i < NUM_PLOT_POINTS - 1; i++) {
-          lastPlotPoints[i] = lastPlotPoints[i + 1];
-        }
-        numPlotPoints--;
-      }
-      lastPlotPoints[numPlotPoints] = point;
-      numPlotPoints++;
     } else if ((String)ARDUINO_SEND_TELEGRAM == command) {
       const char* message = doc[F("message")];
       logTelegram(message);
@@ -536,6 +555,8 @@ void loop() {
   }
 
   if (timerStateSendTelegram.expired() && stateRecievedTelegram) {
+    serialLog(F("Gather points for graph"));
+    gatherPoint();
     stateRecievedTelegram = false;
     serialLog(F("Send state to telegram"));
 
