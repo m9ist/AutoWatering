@@ -1,126 +1,125 @@
 # Автоматическая поливка растений
-На базе датчиков влажности почвы и ардуино сделать систему, которая поливает комнатные растения. С интеграцией с Алисой.
 
-Текущее состояние. Освоена IDE, нарисован прототип экрана, сформулирован список компонентов и функционал.
+Система автоматического полива комнатных растений на базе Arduino Mega2560 + ESP8266. Поддерживает до 16 растений, управляется через Telegram, собирает данные с датчиков влажности почвы и отображает их на дисплее.
 
-## Использование
-Используйте на свой страх и риск. Автор не компетентен в электронике.
+## Текущее состояние
 
-## Начало работы
-- Для работы используется связка [VsCode](https://code.visualstudio.com/) + [PlatformIO](https://platformio.org/platformio-ide). Деплой и компиляция осуществляется средствами IDE.
-- В библиотеке SdFat подправить константу SPI_DRIVER_SELECT -> 2 (не смог победить на одной SPI шине SD карту и экран) libs/../SdFat/src/SdFatConfig.h 
-- Cоздать SecretHolder.cpp и реализовать там методы !TODO!
+- Проект в боевой эксплуатации (3–5 растений подключено)
+- Управление поливом через Telegram-бота
+- Сбор и отображение данных влажности почвы, температуры и влажности воздуха
+- Ручной полив через кнопки на плате
+- Ежедневный автополив по команде из Telegram (`/daily`)
+- Графики влажности по данным за ~3 дня
 
-### Зачем вы разработали этот проект?
-Чтобы был.
+## Архитектура
 
-## Команда проекта
-- tg m9ist
+Два микроконтроллера на одной плате, общаются через UART по текстовому json протоколу:
+
+```
+[Arduino Mega2560]  <--UART-->  [ESP8266]
+  - насос и клапаны               - WiFi
+  - датчики влажности почвы       - Telegram-бот
+  - датчик расхода воды           - веб-интерфейс (SettingsGyver)
+  - датчик тока                   - синхронизация времени (NTP)
+  - дисплей, RTC, кнопки          - Яндекс IoT Core (в разработке)
+```
+
+**Arduino Mega2560** управляет всем железом, хранит стейт в EEPROM, исполняет команды полива.
+
+**ESP8266** обеспечивает связь с внешним миром: принимает команды из Telegram, периодически отправляет стейт (каждый час), прошивается по воздуху (OTA).
 
 ## Компоненты
 
-Ардуино
-Mega2560+WiFi-R3-AT328-ESP8266-32MB-CH340G
+| Компонент | Модель | Описание |
+|-----------|--------|----------|
+| Плата | Mega2560+WiFi-R3-AT328-ESP8266-32MB-CH340G | Arduino Mega + ESP8266 на одной плате |
+| Дисплей | IPS TFT ST7789 240×240 (ZJY-IPS130-V2.0) | Статус системы. [Схема подключения](https://simple-circuit.com/wp-content/uploads/2019/06/arduino-st7789-color-tft-240x240-pixel-interfacing-circuit.png) |
+| RTC | DS1302 (чип DS1307) | Часы реального времени. [Документация](https://www.nookery.ru/ds1302-in-arduino/) |
+| Насос | R385 + драйвер MX1508 (чип L298N) | Перистальтический насос. [Документация L298N](https://robotchip.ru/obzor-drayvera-motora-na-l298n/) |
+| Клапаны | DC 5V HUXUAN электромагнитные | 16 шт, по одному на растение. Драйвер: WAVGAT ULN2003 5V 4-phase |
+| Управление клапанами | 74HC595 сдвиговые регистры (3 шт) | Управление 16+ клапанами через 3 пина. [Урок](https://alexgyver.ru/lessons/74hc595/), [подключение](https://uscr.ru/kak-podklyuchit-sdvigoviy-registr-k-arduino/) |
+| Датчики влажности почвы | HD-38 (SZYTF Soil Moisture Sensor) | 16 шт, аналоговые, ёмкостные. [Пример кода](https://github.com/vrxfile/test_arduino_sensors_modules/blob/master/capacitive_moisture_test/capacitive_moisture_test.ino), [описание](https://myduino.com/product/jhs-273/) |
+| Мультиплексер | CD74HC4067 | 16-канальный, для датчиков влажности и кнопок. [Документация](https://arduinolab.pw/index.php/2017/07/17/16-kanalnyj-analogovyj-multipleksor-cd74hc4067/) |
+| Датчик расхода воды | HESAI YF-S401 | Учёт пролитой воды в мл. [Документация](https://wiki.iarduino.ru/page/sensor-water-flow/) |
+| Датчик тока | ACS712 20A | Диагностика клапанов |
+| Датчик темп./влажности | GY-SHT30-D (чип SHT30) | Температура и влажность воздуха |
+| Датчик уровня воды | XKC-Y25-NPN 5–12V | Бесконтактный. [Документация](https://wiki.amperka.ru/products:sensor-liquid-level-contactless) |
+| SD-ридер | hw-125 (чип B108) | Логирование |
 
-дисплей
-IPS TFT RGB дисплей 1.3" дюйма, 240х240 px, на базе ST7789 цветной
-модель ZJY-IPS130-V2.0
-схема правильного включения https://simple-circuit.com/wp-content/uploads/2019/06/arduino-st7789-color-tft-240x240-pixel-interfacing-circuit.png
+## Команды Telegram
 
-Модуль часов реального времени
-модель DS1302
-чип DS1307
-https://www.nookery.ru/ds1302-in-arduino/
+| Команда | Описание |
+|---------|----------|
+| `/water plantX Yml` | Полить растение X на Y мл. Пример: `/water plant3 50ml` |
+| `/config plantX Yml` | Установить дневную норму полива. Пример: `/config plant2 20ml` |
+| `/state` | Получить текущий стейт (влажность, температура, свободная память) |
+| `/graphs` | ASCII-графики влажности почвы за последние ~3 дня |
+| `/daily` | Запустить ежедневный цикл полива вручную |
+| `/help` | Справка по командам |
 
-насос
-модель R385
+## Начало работы
 
-драйвера шагового двигателя для насоса
-модель MX1508
-чип L298N
-https://robotchip.ru/obzor-drayvera-motora-na-l298n/
+**Среда разработки:** [VS Code](https://code.visualstudio.com/) + [PlatformIO](https://platformio.org/platformio-ide)
 
-драйвер шагового двигателя для клапанов
-WAVGAT ULN2003 драйвер шагового двигателя 5V 4 фазы
-Логика работы. Когда стоит перемычка, питание идет от ардуины, когда подаешь 1 - замыкание на vcc, когда подаешь 0 - замыкание на gnd.
-Когда перемычки нет, чтобы питание шло внешнее, то при подаче 1 - замыкание на gnd, при 0 - цепь разомкнута.
+Проект содержит две прошивки в `platformio.ini`:
+- `megaatmega2560` — для Arduino Mega
+- `esp` — для ESP8266 (загрузка по OTA на адрес `192.168.1.96`)
 
-Датчик температуры и влажности
-модель GY-SHT30-D
-чип SHT30
+**Обязательные шаги перед сборкой:**
 
-SD ридер
-модель hw-125
-чип B108
+1. В библиотеке SdFat изменить константу:
+   `SPI_DRIVER_SELECT → 2` в файле `libs/../SdFat/src/SdFatConfig.h`
+   (SD-карта и дисплей на одной SPI-шине)
 
-электромагнитный клапан
-dc5v 20190526 HUXUAN 5В
+2. Создать файл `src/SecretHolder.cpp` и реализовать методы:
+   ```cpp
+   String ssid()              { return "your_wifi_ssid"; }
+   String wifiPasswork()      { return "your_wifi_password"; }
+   String publicCert()        { return "-----BEGIN CERTIFICATE-----\n..."; }
+   String privateCert()       { return "-----BEGIN RSA PRIVATE KEY-----\n..."; }
+   String getDeviceId()       { return "your_yandex_iot_device_id"; }
+   String getTelegramBotToken() { return "your_telegram_bot_token"; }
+   ```
 
-датчик расхода воды
-HESAI Water Flow Sensor
-модель YF-S401
-[дока](https://wiki.iarduino.ru/page/sensor-water-flow/)
+## Интеграция с Яндекс IoT (в разработке)
 
-Кандидат в датчик влажности почвы SZYTF Soil Moisture Sensor. Аналог.
-модель HD-38
-https://github.com/vrxfile/test_arduino_sensors_modules/blob/master/capacitive_moisture_test/capacitive_moisture_test.ino
-https://myduino.com/product/jhs-273/
+Планируется отправка данных в [Яндекс IoT Core](https://yandex.cloud/ru/docs/iot-core/quickstart) для интеграции с Алисой.
 
-Датчик уровня воды
-модель XKC-Y25-NPN 5-12v
-https://wiki.amperka.ru/products:sensor-liquid-level-contactless
-350 мокро 890 сухая земля (2н)
-
-Аналоговый мультиплексор
-CD74HC4067
-https://arduinolab.pw/index.php/2017/07/17/16-kanalnyj-analogovyj-multipleksor-cd74hc4067/
-
-Сдвиговый резистор (подача питания)
-74HC595 
-https://alexgyver.ru/lessons/74hc595/
-https://uscr.ru/kak-podklyuchit-sdvigoviy-registr-k-arduino/
-
-Тумблеры
-Пищалка
-Датчик освещенности
-Кнопки
-Предохранители
-
-Подсчет выходов:
-|  N | элемент                  | тип | Кол-во    |
-|----|--------------------------|-----|-----------|
-|  1 | Экран                    | d   | 5         |
-|  2 | Модуль реального времени | d   | 3         |
-|  3 | Пищалка                  | d   | 1         |
-|  4 | Датчик влаж и темп возд  |     |           |
-|  5 | SD карта                 | d   | 4         |
-|  6 | Датчик расхода воды      | d   | 1         |
-|  7 | Датчик уровня воды       | d   | 1         |
-|  8 | Управление помпой        | d   | 1         |
-|  9 | Тумблер отключения двиг  | d   | 1         |
-| 10 | Кнопка режима экрана     | d   | 3         |
-| 11 | Датчик освещенности      |     |           |
-| 12 | Кнопка проверки          | d   | 1         |
-Итого: 23-26 d
-
-Одно растение
-|  N | элемент                          | тип | Кол-во |
-|----|----------------------------------|-----|--------|
-|  1 | Кнопка принудительного полива    | d   | 1      |
-|  2 | Датчик влажности почвы показания | a   | 1      |
-|  3 | Тумблер растения                 | d   | 1      |
-|  4 | Управление клапаном              | d   | 1      |
-Итого: 3d + 1a - напрямую
-Первые три позиции за аналоговым мультиплексором, те на 16 выходов 4d выхода + 1(a или d) под показания
-Управление клапаном за сдвиговым регистром (3 выхода на любое кол-во)
-Итого: 5d + 4d+1a + 5d + 3d = 17d + 1a
-
-# Интеграция с Алисой:
-Инструкция от яндекса https://yandex.cloud/ru/docs/iot-core/quickstart
-Сертификат
+Генерация сертификатов (нужны отдельно для реестра и устройства):
+```bash
 openssl req -x509 -newkey rsa:4096 -keyout private-key.pem -out cert.pem -nodes -days 365 -subj "/CN=localhost"
-Важно, сгенерировать сертификат как для реестра, так и для устройства.
+```
 
-Инструкция как получать токены для приложения https://yandex.cloud/ru/docs/iam/operations/iam-token/create#via-cli
-- получить OAuth токен
-- сделать пост запрос (советуют раз в час) `curl --request POST --data "{\"yandexPassportOauthToken\":\"!put here! OAthToken\"}" https://iam.api.cloud.yandex.net/iam/v1/tokens`
+Получение IAM-токена (актуален ~1 час):
+```bash
+curl --request POST \
+  --data '{"yandexPassportOauthToken":"<OAuth-токен>"}' \
+  https://iam.api.cloud.yandex.net/iam/v1/tokens
+```
+
+## Протокол Arduino ↔ ESP
+
+JSON-сообщения содержат ключ `"c"` (команда). Основные команды:
+
+| Направление | Команда | Описание |
+|-------------|---------|----------|
+| ESP → Arduino | `esp_water` | Полить растение |
+| ESP → Arduino | `esp_plant_conf` | Настроить дневную норму |
+| ESP → Arduino | `esp_daily` | Запустить ежедневный полив |
+| ESP → Arduino | `esp_ntp` | Синхронизировать время |
+| Arduino → ESP | `state` | Обновлённый стейт системы |
+| Arduino → ESP | `arduino_tg` | Отправить сообщение в Telegram |
+
+## Известные проблемы и ограничения
+
+- Физические соединения на pogo-pin разъёмах нестабильны — клапаны могут выпасть
+- Ежедневный автозапуск полива по расписанию пока не реализован (только через `/daily`)
+- Интеграция с Яндекс IoT отключена (`sendMessageToIOT` закомментирована)
+- Диагностика клапанов через ACS712 — в разработке
+
+## Команда проекта
+
+- tg [@m9ist](https://t.me/m9ist)
+
+---
+*Используйте на свой страх и риск. Автор не компетентен в электронике.*
