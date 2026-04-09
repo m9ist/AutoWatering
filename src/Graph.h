@@ -89,7 +89,7 @@ class Graph {
           out[i][j] = ' ';
         }
       }
-      int stepY = (maxValue - minValue) / graphHeight;
+      int stepY = max(1, (maxValue - minValue) / graphHeight);
       for (int i = 0; i < graphLength; i++) {
         int j = min((finalGraph[i] - minValue) / stepY, graphHeight - 1);
         out[j][i] = '*';
@@ -170,7 +170,7 @@ class PointsHoler {
 
   void addPoint(uint8_t graphId, uint16_t value) {
     // добавили точку в массив
-    _graphs[graphId * PLANTS_AMOUNT + _ids[graphId]] = value;
+    _graphs[graphId * MEDIAN_NUM_POINTS + _ids[graphId]] = value;
     _ids[graphId]++;
     // если массив переполнен, очистили и сдампили значение
     if (_ids[graphId] == MEDIAN_NUM_POINTS) {
@@ -224,17 +224,17 @@ class PointsHoler {
     if (_ids[graphId] == 0) {
       return UNDEFINED_PLANT_VALUE;
     }
-    int start = graphId * PLANTS_AMOUNT;
+    int start = graphId * MEDIAN_NUM_POINTS;
     if (_ids[graphId] < 3) {
       return _graphs[start];
     }
     // сортировка массива
     for (int i = start; i < start + _ids[graphId] - 1; i++) {
-      for (int j = start; j < start + _ids[graphId] - i - 1; j++) {
-        if (_graphs[j] > _graphs[j + 1]) {
+      for (int j = i + 1; j < start + _ids[graphId]; j++) {
+        if (_graphs[j] < _graphs[i]) {
           uint16_t swap = _graphs[j];
-          _graphs[j] = _graphs[j + 1];
-          _graphs[j + 1] = swap;
+          _graphs[j] = _graphs[i];
+          _graphs[i] = swap;
         }
       }
     }

@@ -295,7 +295,8 @@ void procesTelegramMessage(String message) {
         "\nIf you want to water plant use command /water plantX Yml, where X "
         "in 0..15\n\n  Example: /water plant3 50ml\n\n\n"
         "If you want to config water amount use command /config plantX Yml\n\n"
-        "  Example: /config plant2 20ml"));
+        "  Example: /config plant2 20ml\n\n\n"
+        "/checkvalves - check all active valves are connected"));
     return;
   }
 
@@ -308,6 +309,11 @@ void procesTelegramMessage(String message) {
 
   if (message == F("/daily")) {
     serialLog(ESP_COMMAND_DAILY_TASK, F("From telegram"));
+    return;
+  }
+
+  if (message == F("/checkvalves")) {
+    serialLog(ESP_COMMAND_CHECK_VALVES, F("From telegram"));
     return;
   }
 
