@@ -6,8 +6,12 @@
 /build
 /libraries
 /lib
-/test
 /include
+/.arts
+/.claude
+/.gigaide
+
+QWEN.md
 
 SecretHolder.cpp
 Backup_of_заготовка распиновки.spl8
