@@ -68,6 +68,21 @@ void logFreeRam() {
   logger.logFreeRam(global_state.freeMemorySize);
 }
 
+// Долгий delay с периодическими wdt_reset. WDT настроен на 8 секунд
+// (см. setup), поэтому простой delay(N) при N >= 8000 кикает плату.
+// Шаг 1с — есть запас, и резет идёт перед сном, между кусками и в конце.
+void sleepWithWdt(unsigned long ms) {
+  const unsigned long CHUNK_MS = 1000;
+  wdt_reset();
+  unsigned long elapsed = 0;
+  while (elapsed < ms) {
+    unsigned long step = (ms - elapsed) < CHUNK_MS ? (ms - elapsed) : CHUNK_MS;
+    delay(step);
+    wdt_reset();
+    elapsed += step;
+  }
+}
+
 void setup() {
   Serial.begin(9600);
   Serial3.begin(115200);
@@ -245,8 +260,7 @@ void loop() {
       sendTelegram(info);
       // todo <<<<<< подумать как отказаться от этого, обдумать всю схему работы
       // с экраном
-      delay(3000);
-      wdt_reset();
+      sleepWithWdt(3000);
 
       loopScreen(global_state);
       return;
@@ -268,7 +282,11 @@ void loop() {
   }
 
   if (isCheckButtonPressed()) {
-    sendTelegram(pomp.checkAllActiveValves(global_state, logger));
+    String info = pomp.checkAllActiveValves(global_state, logger);
+    drawScreenMessage(info, logger);
+    sendTelegram(info);
+    sleepWithWdt(5000);
+    loopScreen(global_state);
     return;
   }
 }
