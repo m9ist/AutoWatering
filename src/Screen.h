@@ -61,7 +61,7 @@ void drawScreenMessage(String message, AwLogging& logger) {
 
   lcd.fillScreen(YELLOW);
   lcd.setTextColor(BLUE, YELLOW);
-  lcd.setTextSize(4);
+  lcd.setTextSize(3);
   lcd.setCursor(0, 0);
   lcd.print(message);
 }
