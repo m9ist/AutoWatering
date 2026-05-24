@@ -33,6 +33,7 @@
 | Компонент | Модель | Описание |
 |-----------|--------|----------|
 | Плата | Mega2560+WiFi-R3-AT328-ESP8266-32MB-CH340G | Arduino Mega + ESP8266 на одной плате |
+| DC-DC преобразователь | LM2596S | 2 шт. Питание от внешнего БП 20V: один понижает до 5V (клапаны, электроника), второй до 12V (насос) |
 | Дисплей | IPS TFT ST7789 240×240 (ZJY-IPS130-V2.0) | Статус системы. [Схема подключения](https://simple-circuit.com/wp-content/uploads/2019/06/arduino-st7789-color-tft-240x240-pixel-interfacing-circuit.png) |
 | RTC | DS1302 (чип DS1307) | Часы реального времени. [Документация](https://www.nookery.ru/ds1302-in-arduino/) |
 | Насос | R385 + драйвер MX1508 (чип L298N) | Перистальтический насос. [Документация L298N](https://robotchip.ru/obzor-drayvera-motora-na-l298n/) |
