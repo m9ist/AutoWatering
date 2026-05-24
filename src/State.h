@@ -18,6 +18,7 @@
 #define ESP_COMMAND_WATER_PLANT F("esp_water")
 #define ESP_COMMAND_CONFIG_PLANT F("esp_plant_conf")
 #define ESP_COMMAND_DAILY_TASK F("esp_daily")
+#define ESP_COMMAND_CHECK_VALVES F("esp_check_valves")
 
 #define ARDUINO_COMMAND_STATE F("state")
 #define ARDUINO_SEND_TELEGRAM F("arduino_tg")

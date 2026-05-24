@@ -172,6 +172,11 @@ void processEspCommand(JsonDocument& doc) {
     return;
   }
 
+  if ((String)ESP_COMMAND_CHECK_VALVES == command) {
+    sendTelegram(pomp.checkAllActiveValves(global_state, logger));
+    return;
+  }
+
 #ifdef DEBUG_LOG
   logger.writeln((String)F("Unknown command ") + command);
 #endif
@@ -222,17 +227,22 @@ void loop() {
   for (int i = 0; i < 16; i++) {
     if (pomp.isWaterNowButtonPressed(i)) {
       drawScreenMessage((String)F("Start water plant ") + i, logger);
+      pomp.beginWateringAmpStats(logger);
       pomp.beforeLoopFlowSensor();
       pomp.startWaterPlant(i, logger);
 
       while (pomp.isWaterNowButtonPressed(i)) {
         wdt_reset();
         pomp.loopFlowSensor();
+        pomp.sampleWateringAmpIfNeeded(logger);
       }
 
-      String info = pomp.stopWaterPlant(i, logger);
-      logger.writeln((String)F("ml spend: ") + pomp.getWaterFlowSensorMl());
+      unsigned long actualMs = pomp.stopWaterPlant(i, logger);
+      String info = pomp.buildWaterReport(
+          i, /*requestedMl=*/-1, actualMs, pomp.getWaterFlowSensorMl(),
+          pomp.getWateringAmpDelta());
       drawScreenMessage(info, logger);
+      sendTelegram(info);
       // todo <<<<<< подумать как отказаться от этого, обдумать всю схему работы
       // с экраном
       delay(3000);
@@ -258,7 +268,7 @@ void loop() {
   }
 
   if (isCheckButtonPressed()) {
-    sensors.tmpLoop(global_state);
+    sendTelegram(pomp.checkAllActiveValves(global_state, logger));
     return;
   }
 }
