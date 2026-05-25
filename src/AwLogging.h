@@ -3,7 +3,7 @@
 #include "SdFat.h"
 #include "State.h"
 
-#define SD_TURNED_OFF true
+#define SD_TURNED_OFF false
 
 #define PIN_BUZZER 47
 
@@ -14,6 +14,8 @@
 
 class AwLogging {
  private:
+  SdFs sd;
+  SoftSpiDriver<SD_MISO_PIN, SD_MOSI_PIN, SD_SCK_PIN> softSpi;
   FsFile file;
   bool _sdIsInited = false;
 
@@ -43,12 +45,10 @@ class AwLogging {
       return;
     }
     Serial.println(F("Start init logging..."));
-    SoftSpiDriver<SD_MISO_PIN, SD_MOSI_PIN, SD_SCK_PIN> softSpi;
+    pinMode(SD_CS_PIN, OUTPUT);
+    digitalWrite(SD_CS_PIN, HIGH);
     delay(500);
-    SdSpiConfig sd_config =
-        SdSpiConfig(SD_CS_PIN, DEDICATED_SPI, SD_SCK_MHZ(0), &softSpi);
-    delay(100);
-    SdFs sd;
+    SdSpiConfig sd_config(SD_CS_PIN, DEDICATED_SPI, SD_SCK_MHZ(1), &softSpi);
     if (!sd.begin(sd_config)) {
       sd.initErrorPrint();
       return;
@@ -67,8 +67,12 @@ class AwLogging {
       return;
     }
 
-    if (!file.open(F("LOG.txt"), FILE_WRITE)) {
-      Serial.println(F("open file failed"));
+    file = sd.open("LOG.txt", FILE_WRITE);
+    if (!file) {
+      Serial.print(F("open file failed, sdErr=0x"));
+      Serial.print(sd.sdErrorCode(), HEX);
+      Serial.print(F(" data=0x"));
+      Serial.println(sd.sdErrorData(), HEX);
     } else {
       file.println(freeRamLogginBuffer);
       file.close();
@@ -81,8 +85,12 @@ class AwLogging {
       return;
     }
 
-    if (!file.open(F("LOG.txt"), FILE_WRITE)) {
-      Serial.println(F("open file failed"));
+    file = sd.open("LOG.txt", FILE_WRITE);
+    if (!file) {
+      Serial.print(F("open file failed, sdErr=0x"));
+      Serial.print(sd.sdErrorCode(), HEX);
+      Serial.print(F(" data=0x"));
+      Serial.println(sd.sdErrorData(), HEX);
     } else {
       file.println(dataString);
       file.close();
