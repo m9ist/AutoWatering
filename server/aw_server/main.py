@@ -1,14 +1,18 @@
-"""Точка входа aw-server (роль #14: мост Лог-потока aw/log/# -> Loki)."""
+"""Точка входа aw-server: мост Лог-потока (issue #14) + телеграм-бот (issue #15) —
+одним процессом на общем MQTT-соединении и общем ядре-роутере (core.Router)."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 
 from . import config
 from .core import Router
 from .loki import HttpLokiPort
-from .mqtt_bridge import MqttBridge
+from .mqtt_bridge import MqttBridge, MqttCmdPort
+from .telegram_bot import PtbTelegramPort, build_application, register_handlers
 
 log = logging.getLogger("aw_server")
 
@@ -18,24 +22,74 @@ HEARTBEAT_INTERVAL_S = 10
 
 def _touch_heartbeat() -> None:
     # читается HEALTHCHECK контейнера: показывает, что главный поток жив, а не что
-    # брокер/Loki доступны — недоступность брокера/Loki не должна валить контейнер (#14)
+    # брокер/Loki/Telegram доступны — их недоступность не должна валить контейнер (#14)
     with open(HEARTBEAT_PATH, "w") as f:
         f.write(str(time.time()))
+
+
+async def _hourly_summary_loop(router: Router, telegram_port: PtbTelegramPort, interval_s: int) -> None:
+    while True:
+        await asyncio.sleep(interval_s)
+        text = router.hourly_summary_text(datetime.now(timezone.utc))
+        if text is None:
+            log.info("часовая сводка пропущена: стейта нет или он устарел")
+            continue
+        await telegram_port.broadcast_async(text)
+
+
+async def _run(cfg: config.Config, router: Router, loki_port: HttpLokiPort) -> None:
+    application = build_application(cfg.telegram_bot_token)
+
+    loop = asyncio.get_running_loop()
+    telegram_port = PtbTelegramPort(application.bot, cfg.telegram_whitelist_chat_ids, loop)
+
+    bridge = MqttBridge(cfg, router, loki_port, telegram_port)
+    cmd_port = MqttCmdPort(bridge.client, bridge.cmd_topic)
+    register_handlers(application, router, cmd_port)
+
+    bridge.start()
+
+    # Официальный паттерн PTB для встраивания Application в свой asyncio-луп рядом
+    # с другим кодом (paho работает в собственном потоке, часовая сводка — своя
+    # задача в этом же лупе) — не используем блокирующий Application.run_polling().
+    async with application:
+        await application.start()
+        await application.updater.start_polling()
+        log.info(
+            "aw-server запущен: log-bridge (%slog/#) + телеграм-бот (whitelist: %d чат(ов))",
+            cfg.mqtt_topic_prefix, len(cfg.telegram_whitelist_chat_ids),
+        )
+        summary_task = asyncio.create_task(
+            _hourly_summary_loop(router, telegram_port, cfg.hourly_summary_interval_s)
+        )
+        try:
+            while True:
+                _touch_heartbeat()
+                await asyncio.sleep(HEARTBEAT_INTERVAL_S)
+        finally:
+            summary_task.cancel()
+            await application.updater.stop()
+            await application.stop()
 
 
 def main() -> None:
     cfg = config.load()
     logging.basicConfig(level=cfg.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # httpx (используется python-telegram-bot) на INFO логирует полный URL запроса,
+    # включая TELEGRAM_BOT_TOKEN прямо в пути (https://api.telegram.org/bot<token>/...) —
+    # такое нельзя пускать в docker logs/journald. Токен не секрет уровня пароля к БД,
+    # но даёт полный контроль над ботом, поэтому глушим этот логгер отдельно от общего
+    # log_level.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     loki_port = HttpLokiPort(cfg.loki_url)
-    router = Router(log_topic_prefix=cfg.mqtt_topic_prefix + "log/")
-    bridge = MqttBridge(cfg, router, loki_port)
-    bridge.start()
+    router = Router(
+        log_topic_prefix=cfg.mqtt_topic_prefix + "log/",
+        whitelist_chat_ids=cfg.telegram_whitelist_chat_ids,
+        state_freshness=timedelta(hours=cfg.state_freshness_hours),
+    )
 
-    log.info("aw-server запущен (log-bridge), топик %slog/#", cfg.mqtt_topic_prefix)
-    while True:
-        _touch_heartbeat()
-        time.sleep(HEARTBEAT_INTERVAL_S)
+    asyncio.run(_run(cfg, router, loki_port))
 
 
 if __name__ == "__main__":
