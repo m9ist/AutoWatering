@@ -119,7 +119,8 @@ void test_pointsholder_median_plant0() {
   PointsHoler ph(logger);
   // значения: 300 700 100 400 200 600 500
   // отсортированные: 100 200 300 400 500 600 700
-  // индекс медианы = 0 + 7/2 + 7%2 = 4 → значение 500
+  // индекс медианы = 0 + 7/2 = 3 → значение 400 (настоящая медиана;
+  // раньше индекс был смещён на +1 и брал 500)
   uint16_t vals[] = {300, 700, 100, 400, 200, 600, 500};
   for (int i = 0; i < 7; i++) ph.addPoint(0, vals[i]);
 
@@ -127,7 +128,7 @@ void test_pointsholder_median_plant0() {
   ph.dumpAvg([&](uint8_t plant, uint16_t avg) {
     if (plant == 0) got = avg;
   });
-  TEST_ASSERT_EQUAL(500, got);
+  TEST_ASSERT_EQUAL(400, got);
 }
 
 // dumpAvg с неполным буфером (меньше MEDIAN_NUM_POINTS точек) — берёт первый элемент
