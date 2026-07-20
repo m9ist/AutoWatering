@@ -177,15 +177,6 @@ def test_checkvalves_command_publishes_cmd():
     assert result.cmd_payload == {"c": "esp_check_valves", "timestamp": "2026-07-20 12:00:00"}
 
 
-def test_graphs_command_publishes_cmd():
-    router = _router()
-    now = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
-
-    result = router.handle_graphs(ALLOWED_CHAT, now)
-
-    assert result.cmd_payload == {"c": "esp_graphs", "timestamp": "2026-07-20 12:00:00"}
-
-
 def test_help_command_from_allowed_chat_replies_with_text():
     router = _router()
 
@@ -419,3 +410,50 @@ def test_retained_state_with_different_payload_resets_age_to_unknown():
     assert router.hourly_summary_text(received_at + timedelta(minutes=10)) is None
     reply = router.handle_state(ALLOWED_CHAT, received_at + timedelta(minutes=10)).reply_text
     assert "250" not in reply or "retained" in reply
+
+
+# --------------------------------------------------------------------------- issue #20: метрики стейта
+
+
+def test_live_state_produces_climate_and_plant_pushes():
+    router = _router(plant_names={2: "фикус"})
+    received_at = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+    payload = (
+        b'{"t": 234, "h": 450, "ram": 4200, '
+        b'"p": [{"id": 2, "on": 10, "or": 512, "m": 50}, {"id": 5, "on": 1, "or": 300, "m": 20}]}'
+    )
+
+    stored = router.handle_state_message(payload, received_at)
+
+    assert stored.ok is True
+    assert len(stored.pushes) == 3  # климат + 2 растения
+    climate = stored.pushes[0]
+    assert climate.labels == {"stack": "watering", "service": "esp-state"}
+    assert '"t": 23.4' in climate.line and '"h": 45.0' in climate.line and '"ram": 4200' in climate.line
+    plant2 = stored.pushes[1]
+    assert plant2.labels["service"] == "esp-plant"
+    assert '"name": "фикус"' in plant2.line and '"moisture": 512' in plant2.line
+    plant5 = stored.pushes[2]
+    assert '"name": "plant5"' in plant5.line  # без имени в конфиге — plant<id>
+    # timestamp_ns — от времени приёма (одинаков у всех строк одного стейта)
+    assert climate.timestamp_ns == plant2.timestamp_ns == str(int(received_at.timestamp() * 1e9))
+
+
+def test_retained_state_produces_no_metric_pushes():
+    # retained-redelivery дала бы дубли точек со временем доставки — не пушим
+    router = _router()
+    received_at = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    stored = router.handle_state_message(b'{"t": 234}', received_at, retained=True)
+
+    assert stored.ok is True
+    assert stored.pushes == ()
+
+
+def test_state_without_known_fields_produces_no_pushes():
+    router = _router()
+
+    stored = router.handle_state_message(b'{"unknown": 1}', datetime.now(timezone.utc))
+
+    assert stored.ok is True
+    assert stored.pushes == ()

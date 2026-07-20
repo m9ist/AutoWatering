@@ -1,4 +1,3 @@
-#define NUM_PLOT_POINTS 48
 // #define WITHOUT_ARDUINO
 
 #include <ArduinoJson.h>
@@ -8,7 +7,6 @@
 #include <Communication.h>
 #include <ESP8266WiFi.h>
 #include <EspLogger.h>
-#include <Graph.h>
 #include <PubSubClient.h>
 #include <State.h>
 #include <Timer.h>
@@ -70,23 +68,8 @@ MqttLogSink mqttLogSink(mqttClient, MQTT_TOPIC_LOG);
 Timer timerMqttReconnect;
 const Duration intervalMqttReconnect = Timer::Seconds(5);
 
-// точки для графиков собираются по своему таймеру (раньше были привязаны к
-// часовой отправке стейта в телеграм — этот канал снят, см. issue #13)
-Timer timerGatherPoint;
-const Duration repeatIntervalGatherPoint = Timer::Hours(1);
-bool stateReceived = false;
-
 // полученный из ардуино стейт
 State lastState;
-
-struct PlotPoint {
-  uint32_t time;
-  uint16_t pp[PLANTS_AMOUNT];
-};
-int numPlotPoints = 0;
-int numPlants = 0;
-PlotPoint lastPlotPoints[NUM_PLOT_POINTS];
-PointsHoler pointsHolder = PointsHoler(logger);
 
 Communication comm = Communication(Serial, logger, true);
 
@@ -231,28 +214,6 @@ void publishEvent(const char* type, const String& text) {
   }
 }
 
-// Как sendGraphsToTelegram() до #13: по одному Событию на растение (aw/event
-// вместо logTelegram) — телеграм лимитирует сообщение 4096 символами.
-// Работает внутри MQTT-колбэка: рендер 16 графиков + publish'и держат loop()
-// заметное время — так же, как раньше в телеграм-поллинге (не регресс).
-void handleGraphsCommand() {
-  Graph graph = Graph(numPlants, numPlotPoints, logger);
-  for (int i = 0; i < numPlotPoints; i++) {
-    for (int p = 0; p < PLANTS_AMOUNT; p++) {
-      if (lastPlotPoints[i].pp[p] < UNDEFINED_PLANT_VALUE) {
-        graph.addPoint(p, i, lastPlotPoints[i].pp[p]);
-      }
-    }
-  }
-  bool any = false;
-  for (int k = 0; k < graph.numGraphs(); k++) {
-    if (!graph.isUsed(k)) continue;
-    publishEvent("graphs", graph.plotOne(k));
-    any = true;
-  }
-  if (!any) publishEvent("graphs", F("No graph data yet"));
-}
-
 // Обработка aw/cmd (issue #17): разбор и распознавание команды — в
 // CmdHandler.h (тестируется native), границы id/объёма — через сохранённую
 // checkPlantCommandBounds; форвард в UART — как раньше (serialPlantCommand /
@@ -278,9 +239,6 @@ void handleCmdMessage(const uint8_t* payload, unsigned int length) {
       return;
     case cmdhandler::Action::kCheckValves:
       serialLog(ESP_COMMAND_CHECK_VALVES, F("From aw/cmd"));
-      return;
-    case cmdhandler::Action::kGraphs:
-      handleGraphsCommand();
       return;
     case cmdhandler::Action::kReject:
     default:
@@ -390,44 +348,7 @@ void setup() {
   }
   serialTimeSynced();
 
-  timerGatherPoint.setDuration(repeatIntervalGatherPoint);
   serialLog(F("Esp started successfully."));
-}
-
-void gatherPoint() {
-  PlotPoint point;
-  time_t now = time(nullptr);
-  point.time = now;
-  int lNumPlants = 0;
-  for (int i = 0; i < PLANTS_AMOUNT; i++) {
-    point.pp[i] = UNDEFINED_PLANT_VALUE;
-  }
-  String info;
-  pointsHolder.dumpAvg([&](uint8_t plant, uint16_t avg) {
-    point.pp[plant] = avg;
-    lNumPlants++;
-    logger.print(F(", "));
-    logger.print(plant);
-    logger.print(F(" = "));
-    logger.print(avg);
-  });
-  if (lNumPlants > numPlants) {
-    numPlants = lNumPlants;
-  }
-  logger.print(F("Got point: "));
-  for (int i = 0; i < PLANTS_AMOUNT; i++) {
-    logger.print(point.pp[i]);
-    logger.print(',');
-  }
-  logger.println(';');
-  if (numPlotPoints == NUM_PLOT_POINTS) {
-    for (int i = 0; i < NUM_PLOT_POINTS - 1; i++) {
-      lastPlotPoints[i] = lastPlotPoints[i + 1];
-    }
-    numPlotPoints--;
-  }
-  lastPlotPoints[numPlotPoints] = point;
-  numPlotPoints++;
 }
 
 void processMessageArduino(String message) {
@@ -443,16 +364,10 @@ void processMessageArduino(String message) {
     if ((String)ARDUINO_COMMAND_STATE == command) {
       State state = deserializeState(doc);
       lastState = state;
-      stateReceived = true;
 
-      for (int i = 0; i < PLANTS_AMOUNT; i++) {
-        if (isDefined(lastState.plants[i])) {
-          pointsHolder.addPoint(i, lastState.plants[i].originalValue);
-        }
-      }
-
-      // retained aw/state (issue #17): aw-server отвечает /state и шлёт
-      // часовую сводку из последнего retained-сообщения, без похода на ESP
+      // retained aw/state (issue #17): aw-server отвечает /state, шлёт
+      // часовую сводку и пушит метрики в Loki (issue #20 — графики в
+      // Grafana, накопление точек на ESP выпилено) без похода на ESP
       JsonDocument stateDoc = serializeState(lastState);
       String stateJson;
       serializeJson(stateDoc, stateJson);
@@ -485,15 +400,6 @@ void loop() {
   comm.communicationTick();
   if (comm.communicationHasMessage()) {
     processMessageArduino(comm.communicationGetMessage());
-    return;
-  }
-
-  if (timerGatherPoint.expired() && stateReceived) {
-    stateReceived = false;
-
-    timerGatherPoint.setDuration(repeatIntervalGatherPoint);
-    serialLog(F("Gather points for graph"));
-    gatherPoint();
     return;
   }
 }

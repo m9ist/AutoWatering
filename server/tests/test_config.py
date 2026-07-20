@@ -64,3 +64,27 @@ def test_load_whitespace_only_whitelist_raises(monkeypatch):
 
     with pytest.raises(RuntimeError, match="chat id"):
         config.load()
+
+
+def test_load_parses_plant_names(monkeypatch):
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("PLANT_NAMES", "0:фикус, 3:кактус")
+
+    cfg = config.load()
+
+    assert cfg.plant_names == {0: "фикус", 3: "кактус"}
+
+
+def test_load_plant_names_default_empty(monkeypatch):
+    _set_required_env(monkeypatch)
+    monkeypatch.delenv("PLANT_NAMES", raising=False)
+
+    assert config.load().plant_names == {}
+
+
+def test_load_malformed_plant_names_raises(monkeypatch):
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("PLANT_NAMES", "фикус")
+
+    with pytest.raises(RuntimeError, match="PLANT_NAMES"):
+        config.load()

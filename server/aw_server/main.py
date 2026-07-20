@@ -95,6 +95,7 @@ def main() -> None:
         log_topic_prefix=cfg.mqtt_topic_prefix + "log/",
         whitelist_chat_ids=cfg.telegram_whitelist_chat_ids,
         state_freshness=timedelta(hours=cfg.state_freshness_hours),
+        plant_names=cfg.plant_names,
     )
 
     asyncio.run(_run(cfg, router, loki_port))

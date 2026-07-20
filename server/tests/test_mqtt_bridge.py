@@ -51,6 +51,7 @@ def _cfg() -> Config:
         telegram_whitelist_chat_ids=frozenset({"-1"}),
         state_freshness_hours=2,
         hourly_summary_interval_s=3600,
+        plant_names={},
     )
 
 
@@ -87,7 +88,8 @@ def test_state_topic_is_stored_in_router_and_not_broadcast():
     bridge._on_message(None, None, _FakeMsg("aw/state", b'{"t": 200}'))
 
     assert telegram_port.broadcasted == []
-    assert loki_port.pushed == []
+    # живой стейт даёт метрики для Grafana (issue #20), в чат не идёт
+    assert [p.labels["service"] for p in loki_port.pushed] == ["esp-state"]
     assert router.hourly_summary_text(datetime.now(timezone.utc)) is not None
 
 

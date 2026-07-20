@@ -135,6 +135,9 @@ class MqttBridge:
                     log.warning(
                         "не удалось разобрать aw/state (%d байт): %s", len(msg.payload), result.reason
                     )
+                # метрики стейта для Grafana (issue #20) — только у живых публикаций
+                for push in result.pushes:
+                    self._loki_port.push(push)
                 return
 
             if msg.topic == self._online_topic:

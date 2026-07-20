@@ -33,11 +33,6 @@ CMD_WATER = "esp_water"
 CMD_CONFIG = "esp_plant_conf"
 CMD_DAILY = "esp_daily"
 CMD_CHECK_VALVES = "esp_check_valves"
-# Команда графиков не существовала в старом коде (ASCII-графики раньше рисовались
-# и отправлялись прямо с ESP по таймеру/команде из телеграма). В новой схеме
-# "/graphs" едет как Команда в aw/cmd, а ESP отвечает через aw/event — имя команды
-# для этого контракта здесь и вводится (см. issue #17, где ESP должен его принять).
-CMD_GRAPHS = "esp_graphs"
 
 PLANTS_AMOUNT = 16
 MAX_WATER_AMOUNT_ML = 200
@@ -83,10 +78,20 @@ class CommandResult:
 
 @dataclass(frozen=True)
 class StateStored:
-    """Результат приёма aw/state. ok=False — не удалось разобрать, адаптер логирует reason."""
+    """Результат приёма aw/state. ok=False — не удалось разобрать, адаптер логирует reason.
+
+    pushes — метрики стейта для Loki (issue #20: графики в Grafana). Непустые
+    только для живой публикации ESP: retained-redelivery дала бы дубли точек
+    с временем доставки вместо времени измерения.
+    """
 
     ok: bool
     reason: str | None = None
+    pushes: tuple[LokiPush, ...] = ()
+
+
+STATE_SERVICE = "esp-state"    # климат/RAM: {"t","h","ram"} (t/h уже поделены на 10)
+PLANT_SERVICE = "esp-plant"    # по строке на растение: {"id","name","moisture","norm","on"}
 
 
 @dataclass
@@ -108,8 +113,8 @@ _HELP_TEXT = (
     "/daily — дневной полив всех растений по нормам\n"
     "/checkvalves — проверить, что клапаны физически подключены\n"
     "/state — последний известный стейт системы (из retained aw/state)\n"
-    "/graphs — ASCII-графики влажности по растениям\n"
-    "/help — это сообщение"
+    "/help — это сообщение\n"
+    "Графики влажности/климата — в Grafana (дашборд «Автополив»)"
 )
 
 _PLANT_STATUS = {
@@ -128,10 +133,14 @@ class Router:
         log_topic_prefix: str = "aw/log/",
         whitelist_chat_ids: frozenset[str] = frozenset(),
         state_freshness: timedelta = timedelta(hours=2),
+        plant_names: dict[int, str] | None = None,
     ) -> None:
         self._log_topic_prefix = log_topic_prefix
         self._whitelist = whitelist_chat_ids
         self._state_freshness = state_freshness
+        # человеческие имена растений для метрик/легенд Grafana (issue #20),
+        # конфигурируются env PLANT_NAMES; без имени — "plant<id>"
+        self._plant_names = plant_names or {}
         self._state: _StateSnapshot | None = None
         self._online: str | None = None
 
@@ -218,13 +227,57 @@ class Router:
             # при рестарте aw-server. Если пейлоад совпадает с кэшем — это тот же
             # стейт, чей живой возраст мы уже знаем, не затираем его. Отличается —
             # стейт публиковался, пока нас не было: данные берём, возраст честно
-            # неизвестен (ревью GLM).
+            # неизвестен (ревью GLM). Метрики в Loki из retained не пушим (дубли).
             if self._state is not None and self._state.raw == data:
                 return StateStored(ok=True)
             self._state = _StateSnapshot(raw=data, received_at=None)
             return StateStored(ok=True)
         self._state = _StateSnapshot(raw=data, received_at=received_at)
-        return StateStored(ok=True)
+        return StateStored(ok=True, pushes=self._state_metric_pushes(data, received_at))
+
+    def _state_metric_pushes(self, data: dict, received_at: datetime) -> tuple[LokiPush, ...]:
+        """Живой стейт -> метрики для Grafana (issue #20): одна строка климата
+        (esp-state, t/h уже поделены на 10 — в UART-протоколе они в десятых) и по
+        строке на растение (esp-plant, имя из PLANT_NAMES для легенды)."""
+        ts = str(int(received_at.timestamp() * 1_000_000_000))
+        pushes: list[LokiPush] = []
+
+        climate: dict = {}
+        t = data.get("t")
+        if isinstance(t, (int, float)):
+            climate["t"] = t / 10
+        h = data.get("h")
+        if isinstance(h, (int, float)):
+            climate["h"] = h / 10
+        ram = data.get("ram")
+        if isinstance(ram, (int, float)):
+            climate["ram"] = ram
+        if climate:
+            pushes.append(LokiPush(
+                labels={"stack": STACK_LABEL, "service": STATE_SERVICE},
+                timestamp_ns=ts,
+                line=json.dumps(climate, ensure_ascii=False),
+            ))
+
+        plants = data.get("p")
+        if isinstance(plants, list):
+            for p in plants:
+                if not isinstance(p, dict) or not isinstance(p.get("id"), int):
+                    continue
+                plant_id = p["id"]
+                line = {
+                    "id": plant_id,
+                    "name": self._plant_names.get(plant_id, f"plant{plant_id}"),
+                    "moisture": p.get("or"),
+                    "norm": p.get("m"),
+                    "on": p.get("on"),
+                }
+                pushes.append(LokiPush(
+                    labels={"stack": STACK_LABEL, "service": PLANT_SERVICE},
+                    timestamp_ns=ts,
+                    line=json.dumps(line, ensure_ascii=False),
+                ))
+        return tuple(pushes)
 
     # ---------------------------------------------------------------- issue #15: команды
     def handle_help(self, chat_id: str) -> CommandResult:
@@ -244,11 +297,6 @@ class Router:
     def handle_checkvalves(self, chat_id: str, now: datetime) -> CommandResult:
         return self._simple_command(
             chat_id, CMD_CHECK_VALVES, "Отправлена команда проверки клапанов.", now
-        )
-
-    def handle_graphs(self, chat_id: str, now: datetime) -> CommandResult:
-        return self._simple_command(
-            chat_id, CMD_GRAPHS, "Запрошены графики, жду ответ от ESP.", now
         )
 
     def handle_state(self, chat_id: str, now: datetime) -> CommandResult:

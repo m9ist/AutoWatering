@@ -15,8 +15,8 @@ class ILogSink {
 };
 
 // Логгер за прежним интерфейсом (наследует Print, как раньше sets::Logger из
-// SettingsGyver) — им пользуются Communication.h и PointsHoler/Graph
-// (Graph.h). Сток — MQTT (issue #16): готовые строки склеиваются построчно
+// SettingsGyver) — им пользуется Communication.h.
+// Сток — MQTT (issue #16): готовые строки склеиваются построчно
 // (по '\n', как раньше делал println) и оборачиваются в JSON
 // {"ts","lvl","msg"}. При живом соединении публикуются немедленно; при
 // обрыве — копятся в RAM-кольце (LogRing) и досылаются после реконнекта

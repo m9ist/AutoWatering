@@ -28,16 +28,12 @@ constexpr const char* kCmdWater = "esp_water";
 constexpr const char* kCmdConfig = "esp_plant_conf";
 constexpr const char* kCmdDaily = "esp_daily";
 constexpr const char* kCmdCheckValves = "esp_check_valves";
-// графики не форвардятся на Mega — рендерятся на ESP из Graph/PointsHoler и
-// отвечают через aw/event (имя команды ввёл бот, см. server/aw_server/core.py)
-constexpr const char* kCmdGraphs = "esp_graphs";
 
 enum class Action {
   kWater,        // форвард в UART: serialPlantCommand(ESP_COMMAND_WATER_PLANT, ...)
   kConfig,       // форвард в UART: serialPlantCommand(ESP_COMMAND_CONFIG_PLANT, ...)
   kDaily,        // форвард в UART без id/amount
   kCheckValves,  // форвард в UART без id/amount
-  kGraphs,       // рендер графиков локально на ESP, ответ в aw/event
   kReject,       // отказ на уровне JSON/имени команды, текст — в reason
 };
 
@@ -88,11 +84,9 @@ inline Decision decideCmd(const char* payload, size_t length) {
     d.action = Action::kCheckValves;
     return d;
   }
-  if (strcmp(command, kCmdGraphs) == 0) {
-    d.action = Action::kGraphs;
-    return d;
-  }
 
+  // esp_graphs больше не существует (issue #20: графики строит Grafana из
+  // aw/state) — упадёт сюда как неизвестная команда
   snprintf(d.reason, sizeof(d.reason), "Unknown aw/cmd command: %s", command);
   return d;
 }

@@ -19,6 +19,7 @@ class Config:
     telegram_whitelist_chat_ids: frozenset[str]
     state_freshness_hours: float
     hourly_summary_interval_s: int
+    plant_names: dict[int, str]
 
 
 def load() -> Config:
@@ -34,6 +35,7 @@ def load() -> Config:
         telegram_whitelist_chat_ids=_parse_whitelist(_require("TELEGRAM_WHITELIST_CHAT_IDS")),
         state_freshness_hours=float(os.environ.get("STATE_FRESHNESS_HOURS", "2")),
         hourly_summary_interval_s=int(os.environ.get("HOURLY_SUMMARY_INTERVAL_S", "3600")),
+        plant_names=_parse_plant_names(os.environ.get("PLANT_NAMES", "")),
     )
 
 
@@ -42,6 +44,22 @@ def _require(name: str) -> str:
     if not value:
         raise RuntimeError(f"обязательная переменная окружения {name} не задана")
     return value
+
+
+def _parse_plant_names(value: str) -> dict[int, str]:
+    """Имена растений для метрик/легенд Grafana (issue #20): "0:фикус,3:кактус".
+    Пустая строка — нет имён (метрики используют plant<id>). Кривой элемент —
+    ошибка конфигурации, лучше упасть на старте, чем молча потерять имя."""
+    names: dict[int, str] = {}
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        plant_id_str, sep, name = part.partition(":")
+        if not sep or not plant_id_str.strip().isdigit() or not name.strip():
+            raise RuntimeError(f"PLANT_NAMES: не могу разобрать элемент {part!r} (формат id:имя)")
+        names[int(plant_id_str)] = name.strip()
+    return names
 
 
 def _parse_whitelist(value: str) -> frozenset[str]:
