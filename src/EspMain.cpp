@@ -8,6 +8,7 @@
 #include <ESP8266WiFi.h>
 #include <EspLogger.h>
 #include <Graph.h>
+#include <PubSubClient.h>
 #include <State.h>
 #include <Timer.h>
 #include <time.h>
@@ -16,8 +17,46 @@
 // эти методы
 String ssid();
 String wifiPasswork();
+String mqttUser();
+String mqttPassword();
+
+// Брокер (homelab/stacks/mqtt, ADR-0001) — единственная точка подключения
+// ESP наружу. Хост/порт не секрет (LAN-адрес, как и upload_port в
+// platformio.ini), учётка esp — в SecretHolder.
+const char* const MQTT_HOST = "192.168.1.146";
+const uint16_t MQTT_PORT = 1883;
+const char* const MQTT_TOPIC_ONLINE = "aw/online";
+const char* const MQTT_TOPIC_LOG = "aw/log/esp";
+// сколько строк из RAM-кольца лога досылаем за один тик loop() — чтобы не
+// блокировать UART-обмен с Mega при большой досылке после реконнекта
+const uint8_t MQTT_FLUSH_LINES_PER_TICK = 3;
 
 EspLogger logger;
+
+// Обёртка PubSubClient под интерфейс ILogSink (см. EspLogger.h) — держит
+// MQTT-специфику вне EspLogger.h.
+class MqttLogSink : public ILogSink {
+ public:
+  MqttLogSink(PubSubClient& client, const char* topic)
+      : client_(client), topic_(topic) {}
+  bool connected() override { return client_.connected(); }
+  bool publish(const String& json) override {
+    return client_.publish(topic_, json.c_str());
+  }
+
+ private:
+  PubSubClient& client_;
+  const char* topic_;
+};
+
+WiFiClient mqttNetClient;
+PubSubClient mqttClient(mqttNetClient);
+MqttLogSink mqttLogSink(mqttClient, MQTT_TOPIC_LOG);
+
+// неблокирующий реконнект: одна попытка раз в интервал, без delay-циклов
+Timer timerMqttReconnect;
+const Duration intervalMqttReconnect = Timer::Seconds(5);
+bool mqttWasConnected = false;
 
 // точки для графиков собираются по своему таймеру (раньше были привязаны к
 // часовой отправке стейта в телеграм — этот канал снят, см. issue #13)
@@ -139,6 +178,46 @@ void checkWifi() {
   serialLog(WiFi.localIP().toString());
 }
 
+// Одна попытка подключения к брокеру (без ожидания результата циклом —
+// вызывается из mqttLoop() не чаще, чем раз в intervalMqttReconnect).
+// LWT: aw/online=0 retained, qos1 — если ESP пропадёт без явного
+// отключения, брокер сам выставит offline. После успешного коннекта явно
+// публикуем aw/online=1 retained.
+void mqttConnect() {
+  bool ok =
+      mqttClient.connect("esp-autowatering", mqttUser().c_str(),
+                          mqttPassword().c_str(), MQTT_TOPIC_ONLINE,
+                          /*willQos=*/1, /*willRetain=*/true, "0");
+  if (ok) {
+    mqttClient.publish(MQTT_TOPIC_ONLINE, "1", true);
+    serialLog(F("MQTT connected"));
+  } else {
+    serialLog((String)F("MQTT connect failed, rc=") + mqttClient.state());
+  }
+}
+
+// Первая строка loop(): неблокирующий реконнект по таймеру (без
+// delay-циклов — при недоступном брокере UART-обмен с Mega не деградирует)
+// и порционная досылка RAM-кольца лога после реконнекта.
+void mqttLoop() {
+  mqttClient.loop();
+  bool connectedNow = mqttClient.connected();
+  if (connectedNow && !mqttWasConnected) {
+    logger.onMqttReconnected();
+  }
+  mqttWasConnected = connectedNow;
+
+  if (!connectedNow) {
+    if (timerMqttReconnect.expired()) {
+      timerMqttReconnect.setDuration(intervalMqttReconnect);
+      mqttConnect();
+    }
+    return;
+  }
+
+  logger.flushPending(MQTT_FLUSH_LINES_PER_TICK);
+}
+
 void setupOTA() {
   ArduinoOTA.onStart([]() {
     String type;
@@ -182,6 +261,11 @@ void setup() {
   while (!Serial) {
   }
 
+  // сток лога на MQTT подключаем сразу — до готовности WiFi/брокера строки
+  // просто копятся в RAM-кольце EspLogger и досылаются после первого коннекта
+  logger.setTimestampProvider(getTimestamp);
+  logger.setSink(&mqttLogSink);
+
   serialLog("Start working");
 
   // Устанавливаем Wi-Fi модуль в режим клиента (STA)
@@ -190,6 +274,12 @@ void setup() {
   WiFi.begin(ssid(), wifiPasswork());
   checkWifi();
   setupOTA();
+
+  mqttClient.setServer(MQTT_HOST, MQTT_PORT);
+  mqttClient.setBufferSize(1024);  // state-JSON больше дефолтных 256Б (#17)
+  mqttClient.setKeepAlive(30);
+  timerMqttReconnect.setDuration(intervalMqttReconnect);
+  mqttConnect();
 
   serialLog(F("Start sync time"));
   // POSIX TZ: знак инвертирован, московское UTC+3 записывается как MSK-3
@@ -276,6 +366,7 @@ void processMessageArduino(String message) {
 }
 
 void loop() {
+  mqttLoop();
   ArduinoOTA.handle();
   // todo вынести в другой поток? <<<<<<<<<<<<<<<<<<<<<<
   comm.communicationTick();
