@@ -70,11 +70,7 @@
 
 **Обязательные шаги перед сборкой:**
 
-1. В библиотеке SdFat изменить константу:
-   `SPI_DRIVER_SELECT → 2` в файле `libs/../SdFat/src/SdFatConfig.h`
-   (SD-карта и дисплей на одной SPI-шине)
-
-2. Создать файл `src/SecretHolder.cpp` и реализовать методы:
+1. Создать файл `src/SecretHolder.cpp` и реализовать методы:
    ```cpp
    String ssid()              { return "your_wifi_ssid"; }
    String wifiPasswork()      { return "your_wifi_password"; }

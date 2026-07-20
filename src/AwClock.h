@@ -1,3 +1,5 @@
+#ifndef AW_CLOCK_H
+#define AW_CLOCK_H
 #include <Arduino.h>
 #include <AwLogging.h>
 #include <Ds1302.h>
@@ -65,7 +67,7 @@ class AwClock {
   }
 };
 
-void AwClock::normalizeDate(Ds1302::DateTime newDate) {
+inline void AwClock::normalizeDate(Ds1302::DateTime newDate) {
   uint8_t daysInMonth = month_length(newDate.year, newDate.month - 1);
 
   if (newDate.second >= 60) {
@@ -94,7 +96,7 @@ void AwClock::normalizeDate(Ds1302::DateTime newDate) {
   }
 }
 
-bool AwClock::isNowAfter(Ds1302::DateTime check) {
+inline bool AwClock::isNowAfter(Ds1302::DateTime check) {
   Ds1302::DateTime now = getNow();
 
   if (check.year < now.year) return true;
@@ -114,3 +116,5 @@ bool AwClock::isNowAfter(Ds1302::DateTime check) {
 
   return check.second < now.second;
 }
+
+#endif  // AW_CLOCK_H

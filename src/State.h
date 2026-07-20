@@ -76,7 +76,8 @@ struct State {
   // Список критических ошибок
 };
 
-String dateToString(Ds1302::DateTime now) {
+// функции в хедере, включаемом из нескольких мест — обязаны быть inline (ODR)
+inline String dateToString(Ds1302::DateTime now) {
   String out;
 
   out += "20";
@@ -99,13 +100,13 @@ String dateToString(Ds1302::DateTime now) {
   return out;
 }
 
-bool isDefined(Plant plant) {
+inline bool isDefined(Plant plant) {
   // todo <<<<<< когда будут ошибки учесть их
   return plant.isOn == PLANT_IS_ON;
   //|| plant.originalValue < UNDEFINED_PLANT_VALUE || plant.plantName != "";
 }
 
-JsonDocument serializeState(State state) {
+inline JsonDocument serializeState(State state) {
   JsonDocument out;
   out[COMMAND_KEY] = ARDUINO_COMMAND_STATE;
   int hum = state.humidity * 10;
@@ -130,7 +131,7 @@ JsonDocument serializeState(State state) {
   return out;
 }
 
-State deserializeState(JsonDocument doc) {
+inline State deserializeState(JsonDocument doc) {
   State out;
   int temp = doc[F("t")];
   int hum = doc[F("h")];
@@ -155,7 +156,7 @@ State deserializeState(JsonDocument doc) {
   return out;
 }
 
-void serializeTimeInfo(tm timeinfo, JsonDocument& out) {
+inline void serializeTimeInfo(tm timeinfo, JsonDocument& out) {
   out[F("tm_sec")] = timeinfo.tm_sec;
   out[F("tm_min")] = timeinfo.tm_min;
   out[F("tm_hour")] = timeinfo.tm_hour;
@@ -165,7 +166,7 @@ void serializeTimeInfo(tm timeinfo, JsonDocument& out) {
   out[F("tm_year")] = timeinfo.tm_year;
 }
 
-tm deserializeTimeInfo(JsonDocument doc) {
+inline tm deserializeTimeInfo(JsonDocument doc) {
   tm timeinfo;
   timeinfo.tm_sec = doc[F("tm_sec")];
   timeinfo.tm_min = doc[F("tm_min")];

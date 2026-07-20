@@ -6,7 +6,7 @@
 #include <Arduino.h>
 #include <Timer.h>
 
-#define DEBUG_LOG
+// DEBUG_LOG задаётся через build_flags в platformio.ini (общий для проекта)
 
 class Communication {
  protected:

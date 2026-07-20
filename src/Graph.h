@@ -1,3 +1,5 @@
+#ifndef GRAPH_H
+#define GRAPH_H
 #include <Arduino.h>
 #include <State.h>
 
@@ -242,3 +244,4 @@ class PointsHoler {
     return _graphs[start + _ids[graphId] / 2];
   }
 };
+#endif  // GRAPH_H

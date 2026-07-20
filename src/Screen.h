@@ -1,3 +1,5 @@
+#ifndef SCREEN_H
+#define SCREEN_H
 /*
 ST7789 240x240 1.3" IPS (without CS pin) - only 4+2 wires required:
  #01 GND -> GND
@@ -166,3 +168,4 @@ bool isModeButtonPressed() {
   int v = digitalRead(PIN_MODE_BUTTON);
   return v == LOW;
 }
+#endif  // SCREEN_H

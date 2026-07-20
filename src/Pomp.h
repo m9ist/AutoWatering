@@ -1,3 +1,5 @@
+#ifndef POMP_H
+#define POMP_H
 #include <ACS712.h>
 #include <AwLogging.h>
 #include <FlowSensor.h>
@@ -418,3 +420,5 @@ class Pomp {
     acsPrimed = true;
   }
 };
+
+#endif  // POMP_H

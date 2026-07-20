@@ -1,3 +1,5 @@
+#ifndef SENSORS_H
+#define SENSORS_H
 #include <SHT31_SWW.h>
 
 #include "AwLogging.h"
@@ -114,3 +116,4 @@ class Sensors {
 
 0.670 2.684 3.679 4.670 5.680  через час после поливки
 */
+#endif  // SENSORS_H
