@@ -68,9 +68,6 @@ MqttLogSink mqttLogSink(mqttClient, MQTT_TOPIC_LOG);
 Timer timerMqttReconnect;
 const Duration intervalMqttReconnect = Timer::Seconds(5);
 
-// полученный из ардуино стейт
-State lastState;
-
 Communication comm = Communication(Serial, logger, true);
 
 String getTimestamp() {
@@ -362,17 +359,12 @@ void processMessageArduino(String message) {
   } else {
     const char* command = doc[COMMAND_KEY];
     if ((String)ARDUINO_COMMAND_STATE == command) {
-      State state = deserializeState(doc);
-      lastState = state;
-
       // retained aw/state (issue #17): aw-server отвечает /state, шлёт
-      // часовую сводку и пушит метрики в Loki (issue #20 — графики в
-      // Grafana, накопление точек на ESP выпилено) без похода на ESP
-      JsonDocument stateDoc = serializeState(lastState);
-      String stateJson;
-      serializeJson(stateDoc, stateJson);
-      if (!mqttClient.publish(MQTT_TOPIC_STATE, stateJson.c_str(), true)) {
-        serialLog((String)F("Failed to publish aw/state: ") + stateJson);
+      // часовую сводку и пушит метрики в Loki (issue #20). Кадр Mega уходит
+      // как есть — без deserializeState/serializeState туда-обратно: aw-server
+      // читает ключи через .get(), лишние поля ("c","timestamp") не мешают
+      if (!mqttClient.publish(MQTT_TOPIC_STATE, message.c_str(), true)) {
+        serialLog((String)F("Failed to publish aw/state: ") + message);
       }
     } else if ((String)ARDUINO_SEND_TELEGRAM == command) {
       // раньше пересылалось в телеграм (logTelegram) — теперь Событие в
