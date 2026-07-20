@@ -39,13 +39,24 @@ void test_parse_config_command() {
   TEST_ASSERT_EQUAL(200, amount);
 }
 
-// большие значения парсятся — лимит объёма проверяет Mega (MAX_WATER_AMOUNT_ML)
+// значения до 6 цифр парсятся — границы (id<16, amount<=200) проверяет
+// вызывающий код (checkPlantCommandBounds на ESP, isValidPlantCommand на Mega)
 void test_parse_large_amount_passes_parser() {
   int id = -1, amount = -1;
   TEST_ASSERT_TRUE(parsePlantAmountCommand(String("/water plant0 100000ml"),
                                            String("/water"), id, amount));
   TEST_ASSERT_EQUAL(0, id);
   TEST_ASSERT_EQUAL(100000, amount);
+}
+
+// длиннее 6 цифр — отказ: защита от переполнения toInt/int
+// (иначе plant65536 на 16-битном int Mega превращался бы в id=0)
+void test_parse_rejects_overlong_numbers() {
+  int id, amount;
+  TEST_ASSERT_FALSE(parsePlantAmountCommand(String("/water plant3 1000000ml"),
+                                            String("/water"), id, amount));
+  TEST_ASSERT_FALSE(parsePlantAmountCommand(
+      String("/water plant4294967300 50ml"), String("/water"), id, amount));
 }
 
 void test_parse_rejects_missing_ml_suffix() {
@@ -99,6 +110,7 @@ int main() {
   RUN_TEST(test_parse_water_command);
   RUN_TEST(test_parse_config_command);
   RUN_TEST(test_parse_large_amount_passes_parser);
+  RUN_TEST(test_parse_rejects_overlong_numbers);
   RUN_TEST(test_parse_rejects_missing_ml_suffix);
   RUN_TEST(test_parse_rejects_missing_amount);
   RUN_TEST(test_parse_rejects_garbage_id);

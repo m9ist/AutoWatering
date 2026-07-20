@@ -43,6 +43,15 @@ class AwLogging {
     file.flush();
   }
 
+  // Сбойнула запись (карту передёрнуло) — закрываем хэндл, следующий вызов
+  // переоткроет файл. Иначе он остаётся «открытым, но мёртвым» до ребута.
+  void recoverOnWriteError() {
+    if (!file.getWriteError()) return;
+    Serial.println(F("SD write error, reopen log file"));
+    file.clearWriteError();
+    file.close();
+  }
+
   // int startup_melody[] = {784, 659, 523, 392};
   // int startup_note_durations[] = {300, 300, 400, 500};  // Последняя нота
   // длиннее
@@ -93,6 +102,7 @@ class AwLogging {
     }
     if (!ensureFileOpen()) return;
     file.println(freeRamLogginBuffer);
+    recoverOnWriteError();
     flushIfNeeded();
   }
 
@@ -103,6 +113,7 @@ class AwLogging {
     }
     if (!ensureFileOpen()) return;
     file.println(dataString);
+    recoverOnWriteError();
     flushIfNeeded();
   }
 

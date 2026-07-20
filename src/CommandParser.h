@@ -17,8 +17,12 @@ inline bool isValidInteger(const String& str) {
 
 // Парсит команду вида "<prefix> plantX Yml", например "/water plant3 50ml".
 // true — если распарсилось, id и amount заполнены.
+// Только формат: границы значений (id < 16, amount <= 200) проверяет
+// вызывающий код. Длина числа ограничена 6 цифрами — защита от
+// переполнения toInt/int (65536 иначе превращался бы в id=0).
 inline bool parsePlantAmountCommand(const String& message, const String& prefix,
                                     int& id, int& amount) {
+  const unsigned int MAX_NUMBER_DIGITS = 6;
   String expectedStart = prefix + F(" plant");
   if (!message.startsWith(expectedStart)) return false;
   if (!message.endsWith(F("ml"))) return false;
@@ -27,6 +31,10 @@ inline bool parsePlantAmountCommand(const String& message, const String& prefix,
   String plantId = message.substring(expectedStart.length(), spacePos);
   String amountStr = message.substring(spacePos + 1, message.length() - 2);
   if (!isValidInteger(plantId) || !isValidInteger(amountStr)) return false;
+  if (plantId.length() > MAX_NUMBER_DIGITS ||
+      amountStr.length() > MAX_NUMBER_DIGITS) {
+    return false;
+  }
   id = plantId.toInt();
   amount = amountStr.toInt();
   return true;

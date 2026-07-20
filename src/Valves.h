@@ -50,6 +50,9 @@ class Valves {
     pinMode(PIN_REGISTER_CS, OUTPUT);
     pinMode(PIN_REGISTER_DAT, OUTPUT);
     pinMode(PIN_REGISTER_CLK, OUTPUT);
+    // выходы 74HC595 после подачи питания в случайном состоянии до первой
+    // защёлки — сразу прогоняем нули, чтобы ни один клапан не завис открытым
+    sendNewState(0);
   }
 
   void turnOn(int id, AwLogging& logger) {

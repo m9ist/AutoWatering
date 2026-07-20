@@ -153,7 +153,9 @@ void runDailyCommand() {
 // Валидация команд с plantId/amountMl: id за пределами массива plants — это
 // запись в чужую память и bitWrite с UB (мог открыться случайный клапан),
 // amount без лимита — потоп от опечатки в Telegram.
-bool isValidPlantCommand(int id, int amount) {
+// long, а не int: на AVR int 16-битный, plant65536 усёкся бы до валидного
+// id=0 ещё до проверки.
+bool isValidPlantCommand(long id, long amount) {
   if (id < 0 || id >= PLANTS_AMOUNT) {
     sendTelegram((String)F("Rejected: bad plant id ") + id);
     return false;
@@ -182,8 +184,8 @@ void processEspCommand(JsonDocument& doc) {
   }
 
   if ((String)ESP_COMMAND_WATER_PLANT == command) {
-    int id = doc[F("plantId")];
-    int amount = doc[F("amountMl")];
+    long id = doc[F("plantId")];
+    long amount = doc[F("amountMl")];
     if (!isValidPlantCommand(id, amount)) return;
     logger.buzzerCommand();
     waterPlant(id, amount);
@@ -191,8 +193,8 @@ void processEspCommand(JsonDocument& doc) {
   }
 
   if ((String)ESP_COMMAND_CONFIG_PLANT == command) {
-    int id = doc[F("plantId")];
-    int amount = doc[F("amountMl")];
+    long id = doc[F("plantId")];
+    long amount = doc[F("amountMl")];
     if (!isValidPlantCommand(id, amount)) return;
     global_state.plants[id].dailyAmountMl = amount;
     saveStateEEPROM();

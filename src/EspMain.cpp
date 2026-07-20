@@ -270,6 +270,20 @@ void setupOTA() {
 }
 
 #ifdef TURN_ON_TELEGRAM
+// Границы значений проверяем ещё на ESP: на Mega int 16-битный, без этой
+// проверки plant65536 усекался бы до валидного id. Mega проверяет тоже
+// (защита своего протокола), но с менее внятным сообщением пользователю.
+bool checkPlantCommandBounds(int id, int amount) {
+  if (id >= 0 && id < PLANTS_AMOUNT && amount >= 0 &&
+      amount <= MAX_WATER_AMOUNT_ML) {
+    return true;
+  }
+  logTelegram((String)F("Rejected: plant id must be 0..") +
+              (PLANTS_AMOUNT - 1) + F(", amount 0..") + MAX_WATER_AMOUNT_ML +
+              F("ml"));
+  return false;
+}
+
 // Шлёт по одному графику на сообщение: телеграм лимитирует 4096 символов,
 // один общий текст на 8+ растений молча не отправлялся бы
 void sendGraphsToTelegram() {
@@ -329,6 +343,7 @@ void procesTelegramMessage(String message) {
       logTelegram(F("Invalid command format"));
       return;
     }
+    if (!checkPlantCommandBounds(id, amount)) return;
     serialLog((String)F("Got command from telegram to water plant id=") + id +
               F(", amount=") + amount + F("ml."));
 
@@ -342,6 +357,7 @@ void procesTelegramMessage(String message) {
       logTelegram(F("Invalid command format"));
       return;
     }
+    if (!checkPlantCommandBounds(id, amount)) return;
     serialLog((String)F("Got command from telegram to config plant id=") + id +
               F(", amount=") + amount + F("ml."));
 

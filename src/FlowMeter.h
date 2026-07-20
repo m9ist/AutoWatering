@@ -15,8 +15,8 @@ void waterFlowCount() { flowSensor.count(); }
 // откалиброван, а система нестабильна.
 class FlowMeter {
  private:
-  unsigned long loopStart;
-  unsigned long loopNextCheck;
+  unsigned long loopStart = 0;
+  unsigned long loopNextCheck = 0;
 
  public:
   void init(AwLogging& logger) {
