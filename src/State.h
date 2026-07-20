@@ -9,6 +9,7 @@
 #define PLANT_IS_OFF_EXCEPTION 2
 #define PLANT_IS_UNDEFINED -1
 #define PLANTS_AMOUNT 16
+// todo удалить: не используется, дубль COMMUNICATION_DATA_CHUNK_SIZE
 #define DATA_CHUNK_SIZE 62  // SERIAL_TX_BUFFER_SIZE
 #define UNDEFINED_PLANT_VALUE 1022
 // максимальный объём одной команды полива (и дневной нормы), защита от опечаток
@@ -56,6 +57,7 @@ struct State {
   Plant plants[PLANTS_AMOUNT];
 
   // следующая глобальная проливка растений
+  // todo не используется: планировщик не реализован (см. AwClock::runNextDayTask)
   Ds1302::DateTime nextTaskRuning;
   // загрузка приложения
   Ds1302::DateTime startUpDate;
@@ -71,6 +73,7 @@ struct State {
   // int checkFrequencyInMinutes = 30;
   // int checkFrequencyInMinutes = 30;
   // частота отправки данных в яндекс
+  // todo удалить: не используется, на ESP свой таймер
   int sendIotFrequencyInMinutes = 60;
   // Время последней синхронизации часов
   // Список критических ошибок
@@ -100,13 +103,13 @@ inline String dateToString(Ds1302::DateTime now) {
   return out;
 }
 
-inline bool isDefined(Plant plant) {
+inline bool isDefined(const Plant& plant) {
   // todo <<<<<< когда будут ошибки учесть их
   return plant.isOn == PLANT_IS_ON;
   //|| plant.originalValue < UNDEFINED_PLANT_VALUE || plant.plantName != "";
 }
 
-inline JsonDocument serializeState(State state) {
+inline JsonDocument serializeState(const State& state) {
   JsonDocument out;
   out[COMMAND_KEY] = ARDUINO_COMMAND_STATE;
   int hum = state.humidity * 10;
@@ -131,7 +134,7 @@ inline JsonDocument serializeState(State state) {
   return out;
 }
 
-inline State deserializeState(JsonDocument doc) {
+inline State deserializeState(const JsonDocument& doc) {
   State out;
   int temp = doc[F("t")];
   int hum = doc[F("h")];
@@ -166,7 +169,7 @@ inline void serializeTimeInfo(tm timeinfo, JsonDocument& out) {
   out[F("tm_year")] = timeinfo.tm_year;
 }
 
-inline tm deserializeTimeInfo(JsonDocument doc) {
+inline tm deserializeTimeInfo(const JsonDocument& doc) {
   tm timeinfo;
   timeinfo.tm_sec = doc[F("tm_sec")];
   timeinfo.tm_min = doc[F("tm_min")];

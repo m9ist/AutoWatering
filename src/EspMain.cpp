@@ -70,6 +70,7 @@ const Duration repeatTelegramCheck = Timer::Seconds(10);
 #ifdef TURN_ON_GYVER
 SettingsGyver sett("Auto watering");
 sets::Logger logger(2500);
+// todo удалить: выставляется кнопкой Confirm, но нигде не читается
 bool updatedSettings = false;
 #else
 DEVFULL logger;
@@ -126,22 +127,10 @@ void serialLog(const String& command, const String& s) {
 
 void serialLog(const String& s) { serialLog(ESP_COMMAND_LOG, s); }
 
-void serialCommandWater(int id, int amount) {
+// Отправка в ардуино команды с растением и объёмом (esp_water / esp_plant_conf)
+void serialPlantCommand(const String& command, int id, int amount) {
   JsonDocument json;
-  json[COMMAND_KEY] = ESP_COMMAND_WATER_PLANT;
-  json[F("timestamp")] = getTimestamp();
-  json[F("plantId")] = id;
-  json[F("amountMl")] = amount;
-
-  String sendJson;
-  serializeJson(json, sendJson);
-  logger.println(sendJson);
-  comm.communicationSendMessage(sendJson);
-}
-
-void serialConfig(int id, int amount) {
-  JsonDocument json;
-  json[COMMAND_KEY] = ESP_COMMAND_CONFIG_PLANT;
+  json[COMMAND_KEY] = command;
   json[F("timestamp")] = getTimestamp();
   json[F("plantId")] = id;
   json[F("amountMl")] = amount;
@@ -195,6 +184,8 @@ void build(sets::Builder& b) {
 }
 #endif
 
+// todo удалить вместе с остальным кодом Яндекс IoT (отдельная задача):
+// возвращает пустую заглушку, интеграция отключена
 String getBearerAuthKey() {
   // если пустой или прошел час, то обновляем
   return secretKey;
@@ -288,6 +279,23 @@ bool isValidInteger(String str) {
   return true;
 }
 
+// Парсит команду вида "<prefix> plantX Yml", например "/water plant3 50ml".
+// true — если распарсилось, id и amount заполнены.
+bool parsePlantAmountCommand(const String& message, const String& prefix,
+                             int& id, int& amount) {
+  String expectedStart = prefix + F(" plant");
+  if (!message.startsWith(expectedStart)) return false;
+  if (!message.endsWith(F("ml"))) return false;
+  int spacePos = message.indexOf(' ', expectedStart.length());
+  if (spacePos < 0) return false;
+  String plantId = message.substring(expectedStart.length(), spacePos);
+  String amountStr = message.substring(spacePos + 1, message.length() - 2);
+  if (!isValidInteger(plantId) || !isValidInteger(amountStr)) return false;
+  id = plantId.toInt();
+  amount = amountStr.toInt();
+  return true;
+}
+
 String getGrapghString() {
   Graph graph = Graph(numPlants, numPlotPoints, logger);
   for (int i = 0; i < numPlotPoints; i++) {
@@ -335,40 +343,28 @@ void procesTelegramMessage(String message) {
   }
 
   if (message.startsWith(F("/water"))) {
-    int mlPos = message.indexOf(" ", 8);
-    if (mlPos < 0) {
+    int id, amount;
+    if (!parsePlantAmountCommand(message, F("/water"), id, amount)) {
       logTelegram(F("Invalid command format"));
       return;
     }
-    String plantId = message.substring(12, mlPos);
-    String amount = message.substring(mlPos + 1, message.length() - 2);
-    if (!isValidInteger(plantId) || !isValidInteger(amount)) {
-      logTelegram(F("Invalid command format"));
-      return;
-    }
-    serialLog((String)F("Got command from telegram to water plant id=") +
-              plantId + F(", amount=") + amount + F("ml."));
+    serialLog((String)F("Got command from telegram to water plant id=") + id +
+              F(", amount=") + amount + F("ml."));
 
-    serialCommandWater(plantId.toInt(), amount.toInt());
+    serialPlantCommand(ESP_COMMAND_WATER_PLANT, id, amount);
     return;
   }
 
   if (message.startsWith(F("/config"))) {
-    int mlPos = message.indexOf(" ", 9);
-    if (mlPos < 0) {
+    int id, amount;
+    if (!parsePlantAmountCommand(message, F("/config"), id, amount)) {
       logTelegram(F("Invalid command format"));
       return;
     }
-    String plantId = message.substring(13, mlPos);
-    String amount = message.substring(mlPos + 1, message.length() - 2);
-    if (!isValidInteger(plantId) || !isValidInteger(amount)) {
-      logTelegram(F("Invalid command format"));
-      return;
-    }
-    serialLog((String)F("Got command from telegram to water plant id=") +
-              plantId + F(", amount=") + amount + F("ml."));
+    serialLog((String)F("Got command from telegram to config plant id=") + id +
+              F(", amount=") + amount + F("ml."));
 
-    serialConfig(plantId.toInt(), amount.toInt());
+    serialPlantCommand(ESP_COMMAND_CONFIG_PLANT, id, amount);
     return;
   }
 }

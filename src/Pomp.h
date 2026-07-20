@@ -1,14 +1,11 @@
 #ifndef POMP_H
 #define POMP_H
-#include <ACS712.h>
 #include <AwLogging.h>
-#include <FlowSensor.h>
+#include <CurrentSensor.h>
+#include <FlowMeter.h>
 #include <State.h>
+#include <Valves.h>
 #include <avr/wdt.h>
-
-#define PIN_REGISTER_CS 36   // stcp
-#define PIN_REGISTER_DAT 34  // ds
-#define PIN_REGISTER_CLK 38  // shcp
 
 // общий на оба мультиплексера, тк читать будет по очереди
 #define PIN_PLANT_MULTIPLEXER_S0 A11
@@ -27,51 +24,24 @@
 #define POMP_SPEED_MEDIUM 140
 #define POMP_SPEED_HIGH 180
 
-#define PIN_WATER_FLOW_SENSOR 2
 #define WATER_FLOW_ITERATION_MS 100
 
-#define PIN_AMPERAGE_SENSOR A2
-
-// YFS401 было 2813
-FlowSensor flowSensor = FlowSensor(YFS401, PIN_WATER_FLOW_SENSOR);
-void waterFlowCount() { flowSensor.count(); }
-
+// Оркестратор полива: насос, кнопки/тумблеры через мультиплексеры и
+// сценарии полива. Клапаны, расходомер и датчик тока — отдельные
+// модули (Valves, FlowMeter, CurrentSensor), Pomp их координирует.
 class Pomp {
  private:
   bool pompState = false;
-  uint32_t currentState = 0;
   int plantsToButton[PLANTS_AMOUNT] = {1, 3, 5, 7, 8, 10, 12, 14,
                                        0, 2, 4, 6, 9, 11, 13, 15};
   unsigned long timeCheck;
-  unsigned long pompLoopStart;
-  unsigned long pompLoopNextCheck;
 
   int currentPomp;
   bool acsPrimed = false;
 
-  // Порог дельты тока, при которой считаем клапан подключённым.
-  // Используется и в checkValveConnected (разовая проверка), и в
-  // buildWaterReport (расшифровка статуса в Telegram-отчёте о поливе).
-  static const int VALVE_DELTA_THRESHOLD_MA = 50;
-
-  // статистика тока во время одного цикла полива
-  long wateringAmpSum = 0;
-  int wateringAmpCount = 0;
-  int wateringAmpBaseline = 0;
-  unsigned long wateringAmpLastSample = 0;
-
-  // датчик тока
-  ACS712 ACS = ACS712(PIN_AMPERAGE_SENSOR);
-
-  // N замеров mA_DC с усреднением, ~10ms * n
-  int measureDcAvg(int n) {
-    long sum = 0;
-    for (int i = 0; i < n; i++) {
-      sum += ACS.mA_DC();
-      delay(10);
-    }
-    return (int)(sum / n);
-  }
+  Valves valves;
+  FlowMeter flowMeter;
+  CurrentSensor currentSensor;
 
   void startPomp(AwLogging& logger) {
     logger.writeln(F("Start pomp"));
@@ -98,55 +68,20 @@ class Pomp {
     digitalWrite(PIN_PLANT_MULTIPLEXER_S3, bitRead(id, 3));
   }
 
-  // --------- блок с клапанами
-
-  void turnOnValve(int id, AwLogging& logger) {
-    String out = F("ON valve");
-    out += id;
-    logger.writeln(out);
-    bitWrite(currentState, patchValveId(id), HIGH);
-    sendNewStateValves(currentState);
-  }
-
-  void turnOffValve(int id, AwLogging& logger) {
-    String out = F("OFF valve");
-    out += id;
-    logger.writeln(out);
-    bitWrite(currentState, patchValveId(id), LOW);
-    sendNewStateValves(currentState);
-  }
-
-  // На плате клапана расположены по другому, по 7 на сдвиговый регистр, при чем
-  // с 1 по 8 ножки, поэтому 0 - это 1, 6 - это 7, 7 - это 9, 14 - это 17
-  int patchValveId(int id) {
-    if (id < 7) {
-      return id + 1;
-    } else if (id < 14) {
-      return id + 2;
-    } else {
-      return id + 3;
-    }
-  }
-
-  // мы можем включать/выключать нужное кол-во клапанов через эту функцию
-  void sendNewStateValves(uint32_t state) {
-    // Устанавливаем 1 в соответствующий бит
-    // 16 бит необходимо разделить на два байта:
-    // И записать каждый байт в соответствующий регистр
-    byte register1 = lowByte(state);
-    state = state >> 8;
-    byte register2 = lowByte(state);
-    state = state >> 8;
-    byte register3 = lowByte(state);
-
-    digitalWrite(PIN_REGISTER_CS, LOW);
-
-    // Последовательная передача данных на пин DS
-    shiftOut(PIN_REGISTER_DAT, PIN_REGISTER_CLK, MSBFIRST, register3);
-    shiftOut(PIN_REGISTER_DAT, PIN_REGISTER_CLK, MSBFIRST, register2);
-    shiftOut(PIN_REGISTER_DAT, PIN_REGISTER_CLK, MSBFIRST, register1);
-
-    digitalWrite(PIN_REGISTER_CS, HIGH);
+  // Холостой ON-OFF одного клапана — поднимает «фоновый ток» в линии
+  // до стабильного уровня. Делается один раз за boot.
+  // Подробности эффекта — см. tasks/2026-05-24_valve_detect_pattern.md.
+  void primeAcsLineIfNeeded(AwLogging& logger) {
+    if (acsPrimed) return;
+    const int PRIMER_SLOT = 0;
+    const int PRIMER_ON_MS = 150;
+    const int PRIMER_SETTLE_MS = 200;
+    logger.writeln(F("ACS primer: warming up baseline"));
+    valves.turnOn(PRIMER_SLOT, logger);
+    delay(PRIMER_ON_MS);
+    valves.turnOff(PRIMER_SLOT, logger);
+    delay(PRIMER_SETTLE_MS);
+    acsPrimed = true;
   }
 
  public:
@@ -156,10 +91,6 @@ class Pomp {
   void initPomp(AwLogging& logger) {
     pinMode(PIN_POMP_MAIN, OUTPUT);
     pinMode(PIN_POMP_SPARE, OUTPUT);
-
-    pinMode(PIN_REGISTER_CS, OUTPUT);
-    pinMode(PIN_REGISTER_DAT, OUTPUT);
-    pinMode(PIN_REGISTER_CLK, OUTPUT);
 
     pinMode(PIN_PLANT_MULTIPLEXER_S0, OUTPUT);
     pinMode(PIN_PLANT_MULTIPLEXER_S1, OUTPUT);
@@ -171,15 +102,9 @@ class Pomp {
 
     pinMode(PIN_POMP_TURN_ON, INPUT_PULLUP);
 
-    // работа с датчиком кол-ва воды
-    uint8_t intSensor = digitalPinToInterrupt(PIN_WATER_FLOW_SENSOR);
-    if (intSensor < 0) {
-      // todo добавить в ошибки
-      logger.writeln(F("!!!!!!!!!!!!!Указан вывод без EXT INT"));
-    }
-    flowSensor.begin(waterFlowCount);
-    ACS.autoMidPoint(100, 5);  // калибровка без нагрузки
-    logger.writeln((String)F("ACS midpoint: ") + ACS.getMidPoint());
+    valves.init();
+    flowMeter.init(logger);
+    currentSensor.init(logger);
   }
 
   // обновляет включено ли юзером растение на тумблере
@@ -227,7 +152,7 @@ class Pomp {
   void startWaterPlant(int id, AwLogging& logger) {
     logger.writeln((String)F("Watering plant ") + id);
     timeCheck = millis();
-    turnOnValve(id, logger);
+    valves.turnOn(id, logger);
     // сделано, чтобы не создавать напряжение на клапанах
     delay(200);
     startPomp(logger);
@@ -240,92 +165,52 @@ class Pomp {
     // todo придумать более корректную схему <<<<<<<
     // сделано, чтобы не создавать напряжение на клапанах
     delay(200);
-    turnOffValve(id, logger);
+    valves.turnOff(id, logger);
     return millis() - timeCheck;
   }
 
-  void beforeLoopFlowSensor() {
-    flowSensor.read();
-    flowSensor.resetVolume();
-    flowSensor.resetPulse();
-    pompLoopStart = millis();
-    // считаем, что поток воды будет какое-то время разгоняться
-    pompLoopNextCheck = pompLoopStart + 100;
-  }
+  void beforeLoopFlowSensor() { flowMeter.beforeLoop(); }
 
-  void loopFlowSensor() {
-    if (millis() < pompLoopStart) {
-      // реализация в библиотеке не готова к этому, мы можем только обнулить
-      beforeLoopFlowSensor();
-      return;
-    }
-    if (millis() < pompLoopNextCheck) {
-      return;
-    }
-    if (millis() - pompLoopStart < 400) {
-      pompLoopNextCheck = millis() + 100;
-    } else {
-      pompLoopNextCheck = millis() + 1000;
-    }
-    flowSensor.read();
-  }
+  void loopFlowSensor() { flowMeter.loop(); }
 
-  float getWaterFlowSensorMl() {
-    flowSensor.read();
-    return flowSensor.getVolume() * 1000;
-  }
+  float getWaterFlowSensorMl() { return flowMeter.getMl(); }
 
   // Сброс перед поливом. Подтягивает фоновый ток (primer) и снимает
   // baseline, относительно которого считается дельта в отчёте.
   void beginWateringAmpStats(AwLogging& logger) {
     primeAcsLineIfNeeded(logger);
-    wateringAmpBaseline = measureDcAvg(10);
-    logger.writeln((String)F("Water amp baseline: ") + wateringAmpBaseline +
-                   F("mA"));
-    wateringAmpSum = 0;
-    wateringAmpCount = 0;
-    wateringAmpLastSample = millis();
+    currentSensor.beginWateringStats(logger);
   }
 
-  // Вызывать на каждой итерации цикла полива (как auto, так и manual).
-  // Раз в AMP_SAMPLE_INTERVAL_MS снимает mA_DC, пишет в лог сырое
-  // значение и дельту от baseline, копит сумму.
-  // Сэмплинг по millis — корректно работает и при busy-wait цикле в
-  // waterPlant, и в быстром while ручного полива.
   void sampleWateringAmpIfNeeded(AwLogging& logger) {
-    const unsigned long AMP_SAMPLE_INTERVAL_MS = 500;
-    if (millis() - wateringAmpLastSample < AMP_SAMPLE_INTERVAL_MS) return;
-    wateringAmpLastSample = millis();
-    int mA = ACS.mA_DC();
-    logger.writeln((String)F("Water amp: ") + mA + F("mA (delta ") +
-                   (mA - wateringAmpBaseline) + F("mA)"));
-    wateringAmpSum += mA;
-    wateringAmpCount++;
+    currentSensor.sampleIfNeeded(logger);
   }
 
-  // Возвращает среднюю дельту тока относительно baseline.
-  // Положительная — линия тянула больше baseline во время полива.
-  int getWateringAmpDelta() {
-    if (wateringAmpCount == 0) return 0;
-    int avg = (int)(wateringAmpSum / wateringAmpCount);
-    return avg - wateringAmpBaseline;
-  }
+  int getWateringAmpDelta() { return currentSensor.getWateringDelta(); }
 
   // Собирает унифицированную строку отчёта о поливе.
   // requestedMl < 0 — manual полив без заданного объёма.
   // ampDelta — средний ток поверх baseline (см. getWateringAmpDelta).
+  // snprintf в статический буфер вместо конкатенации String — меньше
+  // реаллокаций кучи (фрагментация на 8КБ RAM).
   String buildWaterReport(int id, int requestedMl, unsigned long actualMs,
                           float realMl, int ampDelta) {
-    String out = (String)F("Done water id ") + id;
+    const char* valveStatus =
+        ampDelta > CurrentSensor::VALVE_DELTA_THRESHOLD_MA ? "OK"
+                                                           : "DISCONNECTED";
+    char buf[140];
     if (requestedMl >= 0) {
-      out += (String)F(" with ") + requestedMl + F("ml");
+      snprintf_P(buf, sizeof(buf),
+                 PSTR("Done water id %d with %dml. Amperage delta: %dmA (%s). "
+                      "Duration %lums. Real ml = %d"),
+                 id, requestedMl, ampDelta, valveStatus, actualMs, (int)realMl);
+    } else {
+      snprintf_P(buf, sizeof(buf),
+                 PSTR("Done water id %d. Amperage delta: %dmA (%s). "
+                      "Duration %lums. Real ml = %d"),
+                 id, ampDelta, valveStatus, actualMs, (int)realMl);
     }
-    out += (String)F(". Amperage delta: ") + ampDelta + F("mA (") +
-           (ampDelta > VALVE_DELTA_THRESHOLD_MA ? F("OK") : F("DISCONNECTED")) +
-           F(")");
-    out += (String)F(". Duration ") + actualMs + F("ms");
-    out += (String)F(". Real ml = ") + realMl;
-    return out;
+    return String(buf);
   }
 
   String waterPlant(int id, int amounMl, AwLogging& logger) {
@@ -367,13 +252,13 @@ class Pomp {
     const int BASE_SAMPLES = 10;
     const int ACTIVE_SAMPLES = 5;
 
-    int base = measureDcAvg(BASE_SAMPLES);
-    turnOnValve(id, logger);
+    int base = currentSensor.measureDcAvg(BASE_SAMPLES);
+    valves.turnOn(id, logger);
     delay(ON_DELAY_MS);
-    int active = measureDcAvg(ACTIVE_SAMPLES);
-    turnOffValve(id, logger);
+    int active = currentSensor.measureDcAvg(ACTIVE_SAMPLES);
+    valves.turnOff(id, logger);
     int delta = active - base;
-    bool connected = delta > VALVE_DELTA_THRESHOLD_MA;
+    bool connected = delta > CurrentSensor::VALVE_DELTA_THRESHOLD_MA;
     logger.writeln((String)F("Valve ") + id + F(" check: delta=") + delta +
                    F("mA -> ") + (connected ? F("OK") : F("DISCONNECTED")));
     return connected;
@@ -401,23 +286,6 @@ class Pomp {
     String result = anyFailed ? F("Valve check FAIL: ") : F("Valve check OK: ");
     result += details;
     return result;
-  }
-
- private:
-  // Холостой ON-OFF одного клапана — поднимает «фоновый ток» в линии
-  // до стабильного уровня. Делается один раз за boot.
-  // Подробности эффекта — см. tasks/2026-05-24_valve_detect_pattern.md.
-  void primeAcsLineIfNeeded(AwLogging& logger) {
-    if (acsPrimed) return;
-    const int PRIMER_SLOT = 0;
-    const int PRIMER_ON_MS = 150;
-    const int PRIMER_SETTLE_MS = 200;
-    logger.writeln(F("ACS primer: warming up baseline"));
-    turnOnValve(PRIMER_SLOT, logger);
-    delay(PRIMER_ON_MS);
-    turnOffValve(PRIMER_SLOT, logger);
-    delay(PRIMER_SETTLE_MS);
-    acsPrimed = true;
   }
 };
 

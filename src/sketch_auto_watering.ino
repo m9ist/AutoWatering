@@ -134,7 +134,7 @@ void runDailyCommand() {
   sendTelegram(F("Start daily task."));
   for (int i = 0; i < PLANTS_AMOUNT; i++) {
     logFreeRam();
-    Plant plant = global_state.plants[i];
+    const Plant& plant = global_state.plants[i];
     if (plant.isOn != PLANT_IS_ON || plant.dailyAmountMl <= 0) {
       continue;
     }
@@ -189,11 +189,16 @@ void processEspCommand(JsonDocument& doc) {
     if (!isValidPlantCommand(id, amount)) return;
     global_state.plants[id].dailyAmountMl = amount;
     saveStateEEPROM();
-    String info = "Current config: ";  // оборачивать в F нельзя, виснет...
+    // snprintf в буфер вместо конкатенации String: меньше реаллокаций кучи,
+    // прошлая версия на String с F() зависала (фрагментация)
+    char info[340];
+    int pos = snprintf_P(info, sizeof(info), PSTR("Current config: "));
     for (int i = 0; i < PLANTS_AMOUNT; i++) {
-      if (global_state.plants[i].dailyAmountMl > 0) {
-        info += (String)F("plant ") + i + F(" = ") +
-                global_state.plants[i].dailyAmountMl + F(" ml, ");
+      if (global_state.plants[i].dailyAmountMl > 0 &&
+          pos < (int)sizeof(info)) {
+        pos += snprintf_P(info + pos, sizeof(info) - pos,
+                          PSTR("plant %d = %d ml, "), i,
+                          global_state.plants[i].dailyAmountMl);
       }
     }
     sendTelegram(info);

@@ -31,6 +31,9 @@ class AwClock {
     return now;
   }
 
+  // todo удалить или доделать: не вызывается нигде, планировщик ежедневного
+  // полива не реализован. Внимание: normalizeDate принимает дату по значению
+  // и потому ничего не нормализует — починить при реализации.
   bool runNextDayTask(State& state, AwLogging& logger) {
     if (isNowAfter(state.nextTaskRuning)) {
       logger.writeln(dateToString(state.nextTaskRuning) + F(" < ") +
