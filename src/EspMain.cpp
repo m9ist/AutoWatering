@@ -1,88 +1,29 @@
-// 3 дня раз для замеров раз в repeatIntervalStateSendIot
 #define NUM_PLOT_POINTS 48
-#define TURN_ON_TELEGRAM
-#define TURN_ON_GYVER
 // #define WITHOUT_ARDUINO
 
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
 #include <CommandParser.h>
 #include <Communication.h>
-#include <ESP8266HTTPClient.h>
 #include <ESP8266WiFi.h>
+#include <EspLogger.h>
 #include <Graph.h>
-#ifdef TURN_ON_GYVER
-#include <SettingsGyver.h>
-#else
-#include <DEVFULL.h>
-#endif
 #include <State.h>
 #include <Timer.h>
-#ifdef TURN_ON_TELEGRAM
-#include <UniversalTelegramBot.h>
-#endif
-#include <WiFiClientSecure.h>
 #include <time.h>
 
 // Блок из SecretHolder, чтобы не заводить лишний .h файл, нужно там реализовать
 // эти методы
 String ssid();
 String wifiPasswork();
-String publicCert();
-String privateCert();
-String getDeviceId();
-String getTelegramBotToken();
 
-// Настройки Яндекс IoT
-const char* yandex_iot_endpoint = "iot-data.api.cloud.yandex.net";
-const int yandex_iot_port = 443;
+EspLogger logger;
 
-WiFiClientSecure espClient;
-String secretKey;
-#ifdef TURN_ON_TELEGRAM
-UniversalTelegramBot telegramBot(getTelegramBotToken(), espClient);
-// todo <<<<<<<<<<<<<<< по хорошему надо запоминать между запусками точку
-// общения, либо вообще на несколько точек завязаться
-String telegramChatId = "-5065686553";
-
-// Защита: команды принимаются только из чатов белого списка, остальные
-// игнорируются (иначе любой нашедший бота получает управление поливом).
-// TELEGRAM_WHITELIST_ENABLED = false — отключить защиту.
-const bool TELEGRAM_WHITELIST_ENABLED = true;
-const char* TELEGRAM_ALLOWED_CHAT_IDS[] = {"-5065686553"};
-
-bool isAllowedTelegramChat(const String& chatId) {
-  if (!TELEGRAM_WHITELIST_ENABLED) return true;
-  for (unsigned int i = 0; i < sizeof(TELEGRAM_ALLOWED_CHAT_IDS) /
-                                   sizeof(TELEGRAM_ALLOWED_CHAT_IDS[0]);
-       i++) {
-    if (chatId == TELEGRAM_ALLOWED_CHAT_IDS[i]) return true;
-  }
-  return false;
-}
-Timer timerTelegramCheck;
-const Duration repeatTelegramCheck = Timer::Seconds(10);
-
-#define GRAPH_HEIGHT 10
-#define GRAPH_LENGHT_MAX 40
-#define GRAPH_LABELS 5
-#endif
-
-#ifdef TURN_ON_GYVER
-SettingsGyver sett("Auto watering");
-sets::Logger logger(2500);
-// todo удалить: выставляется кнопкой Confirm, но нигде не читается
-bool updatedSettings = false;
-#else
-DEVFULL logger;
-#endif
-
-Timer timerStateSendIot;
-const Duration repeatIntervalStateSendIot = Timer::Minutes(30);
-bool stateRecievedIot = false;
-Timer timerStateSendTelegram;
-const Duration repeatIntervalStateSendTelegram = Timer::Hours(1);
-bool stateRecievedTelegram = false;
+// точки для графиков собираются по своему таймеру (раньше были привязаны к
+// часовой отправке стейта в телеграм — этот канал снят, см. issue #13)
+Timer timerGatherPoint;
+const Duration repeatIntervalGatherPoint = Timer::Hours(1);
+bool stateReceived = false;
 
 // полученный из ардуино стейт
 State lastState;
@@ -159,58 +100,20 @@ void serialTimeSynced() {
 
 void serialError(const String& s) { serialLog(ESP_COMMAND_LOG, s); }
 
-void logTelegram(String message) {
-  if (telegramChatId == "") return;
-
-#ifdef TURN_ON_TELEGRAM
-  if (message.length() < 100) {
-    serialLog((String)F("Send telegram: ") + message);
+// Границы значений проверяем ещё на ESP: на Mega int 16-битный, без этой
+// проверки plant65536 усекался бы до валидного id. Mega проверяет тоже
+// (защита своего протокола), но с менее внятным сообщением пользователю.
+// Сейчас не вызывается (телеграм-канал снят, см. issue #13) — понадобится
+// для валидации команд из aw/cmd (MQTT), см. issue #17.
+bool checkPlantCommandBounds(int id, int amount) {
+  if (id >= 0 && id < PLANTS_AMOUNT && amount >= 0 &&
+      amount <= MAX_WATER_AMOUNT_ML) {
+    return true;
   }
-  telegramBot.sendMessage(telegramChatId, getTimestamp() + F(": ") + message,
-                          F("Markdown"), 0);
-#endif
-}
-
-#ifdef TURN_ON_GYVER
-void build(sets::Builder& b) {
-  b.Log(logger, "State");
-  b.PlotStack(H(run), "p0;p1;p2;p3;p4;p5;p6;p7;p8;p9;p10;p11;p12;p13;p14;p15");
-  if (PLANTS_AMOUNT != 16) serialError("Plants amount not 16!");
-  if (b.beginButtons()) {
-    if (b.Button("Confirm")) {
-      updatedSettings = true;
-    }
-    b.endButtons();
-  }
-}
-#endif
-
-// todo удалить вместе с остальным кодом Яндекс IoT (отдельная задача):
-// возвращает пустую заглушку, интеграция отключена
-String getBearerAuthKey() {
-  // если пустой или прошел час, то обновляем
-  return secretKey;
-}
-
-void setupWifiClient() {
-  // Настройка безопасного соединения
-  serialLog(F("Setup secure wifi..."));
-  // BearSSL::X509List xYa(ya_sert);
-  // espClient.setTrustAnchors(&xYa);
-  espClient.setTimeout(15000);
-  espClient.setBufferSizes(4096, 4096);
-  espClient.setInsecure();
-  BearSSL::X509List x509(publicCert().c_str());
-  BearSSL::PrivateKey* privKey = new BearSSL::PrivateKey(privateCert().c_str());
-  espClient.setClientRSACert(&x509, privKey);
-
-  serialLog(F("Check connection..."));
-  if (!espClient.connect(yandex_iot_endpoint, yandex_iot_port)) {
-    serialLog((String)F("Connection to iot failed. error = ") +
-              espClient.getLastSSLError());
-  } else {
-    serialLog(F("Connection to iot is tested."));
-  }
+  serialLog((String)F("Rejected: plant id must be 0..") +
+            (PLANTS_AMOUNT - 1) + F(", amount 0..") + MAX_WATER_AMOUNT_ML +
+            F("ml"));
+  return false;
 }
 
 bool isTimeInited() { return time(nullptr) > 1000000000; }
@@ -269,136 +172,6 @@ void setupOTA() {
   ArduinoOTA.begin();
 }
 
-#ifdef TURN_ON_TELEGRAM
-// Границы значений проверяем ещё на ESP: на Mega int 16-битный, без этой
-// проверки plant65536 усекался бы до валидного id. Mega проверяет тоже
-// (защита своего протокола), но с менее внятным сообщением пользователю.
-bool checkPlantCommandBounds(int id, int amount) {
-  if (id >= 0 && id < PLANTS_AMOUNT && amount >= 0 &&
-      amount <= MAX_WATER_AMOUNT_ML) {
-    return true;
-  }
-  logTelegram((String)F("Rejected: plant id must be 0..") +
-              (PLANTS_AMOUNT - 1) + F(", amount 0..") + MAX_WATER_AMOUNT_ML +
-              F("ml"));
-  return false;
-}
-
-// Шлёт по одному графику на сообщение: телеграм лимитирует 4096 символов,
-// один общий текст на 8+ растений молча не отправлялся бы
-void sendGraphsToTelegram() {
-  Graph graph = Graph(numPlants, numPlotPoints, logger);
-  for (int i = 0; i < numPlotPoints; i++) {
-    for (int p = 0; p < PLANTS_AMOUNT; p++) {
-      if (lastPlotPoints[i].pp[p] < UNDEFINED_PLANT_VALUE) {
-        graph.addPoint(p, i, lastPlotPoints[i].pp[p]);
-      }
-    }
-  }
-  bool any = false;
-  for (int k = 0; k < graph.numGraphs(); k++) {
-    if (!graph.isUsed(k)) continue;
-    logTelegram(graph.plotOne(k));
-    any = true;
-  }
-  if (!any) logTelegram(F("No graph data yet"));
-}
-
-void procesTelegramMessage(String message) {
-  if (message == F("/state")) {
-    timerStateSendTelegram.setDuration(Timer::Seconds(1));
-    logTelegram(F("Setup timer to 1sec to force process state"));
-    return;
-  }
-
-  if (message == F("/help")) {
-    logTelegram(F(
-        "\nIf you want to water plant use command /water plantX Yml, where X "
-        "in 0..15\n\n  Example: /water plant3 50ml\n\n\n"
-        "If you want to config water amount use command /config plantX Yml\n\n"
-        "  Example: /config plant2 20ml\n\n\n"
-        "/checkvalves - check all active valves are connected"));
-    return;
-  }
-
-  if (message == F("/graphs")) {
-    serialLog(ESP_COMMAND_LOG, F("Got graph command"));
-    sendGraphsToTelegram();
-    return;
-  }
-
-  if (message == F("/daily")) {
-    serialLog(ESP_COMMAND_DAILY_TASK, F("From telegram"));
-    return;
-  }
-
-  if (message == F("/checkvalves")) {
-    serialLog(ESP_COMMAND_CHECK_VALVES, F("From telegram"));
-    return;
-  }
-
-  if (message.startsWith(F("/water"))) {
-    int id, amount;
-    if (!parsePlantAmountCommand(message, F("/water"), id, amount)) {
-      logTelegram(F("Invalid command format"));
-      return;
-    }
-    if (!checkPlantCommandBounds(id, amount)) return;
-    serialLog((String)F("Got command from telegram to water plant id=") + id +
-              F(", amount=") + amount + F("ml."));
-
-    serialPlantCommand(ESP_COMMAND_WATER_PLANT, id, amount);
-    return;
-  }
-
-  if (message.startsWith(F("/config"))) {
-    int id, amount;
-    if (!parsePlantAmountCommand(message, F("/config"), id, amount)) {
-      logTelegram(F("Invalid command format"));
-      return;
-    }
-    if (!checkPlantCommandBounds(id, amount)) return;
-    serialLog((String)F("Got command from telegram to config plant id=") + id +
-              F(", amount=") + amount + F("ml."));
-
-    serialPlantCommand(ESP_COMMAND_CONFIG_PLANT, id, amount);
-    return;
-  }
-}
-#endif
-
-void loopTelegram() {
-  if (!timerTelegramCheck.expired()) return;
-  timerTelegramCheck.setDuration(repeatTelegramCheck);
-
-#ifdef TURN_ON_TELEGRAM
-  int numNewMessages =
-      telegramBot.getUpdates(telegramBot.last_message_received + 1);
-  if (numNewMessages == 0) return;
-  serialLog(F("Telegram start communication!"));
-  logTelegram(F("Got it"));
-  for (int i = 0; i < numNewMessages; i++) {
-    String chatId = telegramBot.messages[i].chat_id;
-    if (!isAllowedTelegramChat(chatId)) {
-      serialLog(F("Ignore message from not allowed chat ") + chatId);
-      continue;
-    }
-    if (telegramChatId != chatId) {
-      serialLog(F("Got new chatid ") + chatId);
-      telegramChatId = chatId;
-    }
-    String message = telegramBot.messages[i].text;
-    message.trim();
-    serialLog((String)F("Got message from telegram: ") + message);
-    if (message.endsWith(F("@AquatoriaAutoWatering_bot"))) {
-      message = message.substring(0, message.length() - 26);
-      serialLog((String)F("Updated message: ") + message);
-    }
-    procesTelegramMessage(message);
-  }
-#endif
-}
-
 void setup() {
 #ifdef WITHOUT_ARDUINO
   Serial.begin(9600);  // для отладки
@@ -428,22 +201,8 @@ void setup() {
   }
   serialTimeSynced();
 
-  setupWifiClient();
-
-#ifdef TURN_ON_GYVER
-  sett.begin();
-  sett.onBuild(build);
-  // sett.onUpdate(updateSettings);
-#endif
-
-#ifdef TURN_ON_TELEGRAM
-  // telegramBot.longPoll = 20;
-#endif
-
-  timerStateSendIot.setDuration(repeatIntervalStateSendIot);
-  timerStateSendTelegram.setDuration(repeatIntervalStateSendTelegram);
-  timerTelegramCheck.setDuration(repeatTelegramCheck);
-  logTelegram(F("Esp started successfully."));
+  timerGatherPoint.setDuration(repeatIntervalGatherPoint);
+  serialLog(F("Esp started successfully."));
 }
 
 void gatherPoint() {
@@ -482,46 +241,6 @@ void gatherPoint() {
   numPlotPoints++;
 }
 
-void sendMessageToIOT() {
-  serialLog(F("Start sending message to iot..."));
-  if (true) {
-    serialLog(F("Communication with iot is turned off, exit."));
-    return;
-  }
-  HTTPClient https;
-  String url = F("https://");
-  url += yandex_iot_endpoint;
-  url += F("/iot-devices/v1/devices/");
-  url += getDeviceId();
-  url += F("/publish");
-  https.begin(espClient, url);
-
-  https.addHeader(F("Content-Type"), F("application/json"));
-  https.addHeader(F("Connection"), F("close"));
-  https.addHeader(F("Authorization"),
-                  (String)F("Bearer ") + getBearerAuthKey());
-
-  JsonDocument subDoc;
-  subDoc[F("timestamp")] = getTimestamp();
-  subDoc[F("ip_address")] = WiFi.localIP().toString();
-  subDoc[F("rssi")] = WiFi.RSSI();
-
-  JsonDocument doc;
-  doc[F("topic")] = "events";
-  // doc["data"] = 1;
-  doc[F("data")] = "test";
-
-  String json;
-  serializeJson(doc, json);
-
-  serialLog(F("post: ") + json);
-  int httpCode = https.POST(json);
-  serialLog((String)F("got result ") + httpCode);
-  String response = https.getString();
-  serialLog(F("Response: ") + response);
-  https.end();
-}
-
 void processMessageArduino(String message) {
   logger.println(getTimestamp());
   logger.println(message);
@@ -535,8 +254,7 @@ void processMessageArduino(String message) {
     if ((String)ARDUINO_COMMAND_STATE == command) {
       State state = deserializeState(doc);
       lastState = state;
-      stateRecievedIot = true;
-      stateRecievedTelegram = true;
+      stateReceived = true;
 
       for (int i = 0; i < PLANTS_AMOUNT; i++) {
         if (isDefined(lastState.plants[i])) {
@@ -544,8 +262,12 @@ void processMessageArduino(String message) {
         }
       }
     } else if ((String)ARDUINO_SEND_TELEGRAM == command) {
+      // раньше пересылалось в телеграм (logTelegram) — канал снят (#13),
+      // просто логируем; событие для человека появится через aw/event
+      // после MQTT-слоя (#16/#17)
       const char* message = doc[F("message")];
-      logTelegram(message);
+      serialLog((String)F("Arduino message (telegram channel removed): ") +
+                message);
     } else {
       serialError((String)F("Unknown command ") + command);
       serialLog(message);
@@ -562,30 +284,12 @@ void loop() {
     return;
   }
 
-#ifdef TURN_ON_GYVER
-  sett.tick();
-#endif
-  loopTelegram();
+  if (timerGatherPoint.expired() && stateReceived) {
+    stateReceived = false;
 
-  if (timerStateSendIot.expired() && stateRecievedIot) {
-    stateRecievedIot = false;
-
-    timerStateSendIot.setDuration(repeatIntervalStateSendIot);
-    sendMessageToIOT();
-    return;
-  }
-
-  if (timerStateSendTelegram.expired() && stateRecievedTelegram) {
+    timerGatherPoint.setDuration(repeatIntervalGatherPoint);
     serialLog(F("Gather points for graph"));
     gatherPoint();
-    stateRecievedTelegram = false;
-    serialLog(F("Send state to telegram"));
-
-    timerStateSendTelegram.setDuration(repeatIntervalStateSendTelegram);
-    JsonDocument des = serializeState(lastState);
-    String outJson;
-    serializeJson(des, outJson);
-    logTelegram((String)F("State: ") + outJson);
     return;
   }
 }
