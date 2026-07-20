@@ -10,7 +10,7 @@
 class ILogSink {
  public:
   virtual bool connected() = 0;
-  virtual bool publish(const String& json) = 0;
+  virtual bool publish(const char* json) = 0;
   virtual ~ILogSink() {}
 };
 
@@ -20,7 +20,7 @@ class ILogSink {
 // (по '\n', как раньше делал println) и оборачиваются в JSON
 // {"ts","lvl","msg"}. При живом соединении публикуются немедленно; при
 // обрыве — копятся в RAM-кольце (LogRing) и досылаются после реконнекта
-// (см. flushPending/onMqttReconnected, дёргаются из EspMain::mqttLoop).
+// (см. flushPending, дёргается из EspMain::mqttLoop).
 //
 // Важно: при неудачной попытке publish() эта неудача НЕ логируется через
 // сам логгер — иначе лог о сбое публикации попытался бы опубликоваться
@@ -32,6 +32,8 @@ class EspLogger : public Print {
   static const size_t kMaxLineLen = 240;
   // размер RAM-кольца для строк, ждущих реконнекта (issue #16: ~2-4 КБ)
   static const size_t kRingCapacity = 3072;
+  // буфер досылки: kMaxLineLen после JSON-экранирования (×2) + обёртка
+  static const size_t kFlushBufLen = 640;
 
   EspLogger() : ring_(kRingCapacity) {}
 
@@ -59,36 +61,38 @@ class EspLogger : public Print {
     timestampProvider_ = provider;
   }
 
-  // Вызывать из EspMain при обнаружении фронта реконнекта (было
-  // disconnected, стало connected): если за время обрыва что-то потерялось
-  // из кольца, публикует маркер "reconnected, N lines lost" и сбрасывает
-  // счётчик потерь. Строки, которые остались в кольце (не потерялись),
-  // досылаются отдельно через flushPending().
-  void onMqttReconnected() {
-    uint32_t lost = ring_.lostCount();
-    if (lost == 0 || sink_ == nullptr) return;
-    ring_.resetLostCount();
-    String msg = (String)F("reconnected, ") + lost + F(" lines lost");
-    sink_->publish(buildLogJson(msg, F("error")));
-  }
-
   // Досылает из кольца не больше maxLines строк за вызов — не блокирует
-  // loop(), вызывать раз в тик, когда sink_->connected().
+  // loop(), вызывать раз в тик, когда sink_->connected(). Сначала — маркер
+  // потерь (если были), потом строки кольца.
   void flushPending(uint8_t maxLines) {
     if (sink_ == nullptr || !sink_->connected()) return;
-    // запас под JSON-обёртку и экранирование кавычек в msg (kMaxLineLen —
-    // это длина сырой строки до экранирования)
-    char buf[512];
+    // Маркер публикуем раньше строк кольца: потерянные (вытесненные) строки
+    // старше оставшихся, так хронология в Loki сохраняется. Счётчик
+    // сбрасываем только после подтверждённой публикации — иначе при сбое
+    // publish маркер пропал бы насовсем.
+    uint32_t lost = ring_.lostCount();
+    if (lost > 0) {
+      String msg = (String)F("reconnected, ") + lost + F(" lines lost");
+      if (!sink_->publish(buildLogJson(msg, F("error")).c_str())) return;
+      ring_.resetLostCount();
+    }
+    // запас: kMaxLineLen сырых символов после JSON-экранирования (худший
+    // случай ×2) + обёртка {"ts","lvl","msg"} — до ~540 байт
+    char buf[kFlushBufLen];
     for (uint8_t i = 0; i < maxLines && !ring_.empty(); i++) {
-      size_t len = ring_.pop(buf, sizeof(buf) - 1);
-      if (len == 0) break;
-      buf[len] = '\0';
-      if (!sink_->publish(String(buf))) {
-        // не смогли отправить — вернём строку в кольцо и прервём досылку
-        // в этом тике (см. комментарий класса про рекурсию — не логируем)
-        ring_.push(buf, len);
-        break;
+      size_t fullLen = ring_.peek(buf, sizeof(buf) - 1);
+      if (fullLen == 0) break;
+      if (fullLen > sizeof(buf) - 1) {
+        // строка не влезает в буфер досылки (при kMaxLineLen=240 не должно
+        // случаться) — обрезанный битый JSON не публикуем, считаем потерей
+        ring_.dropFront(/*countAsLost=*/true);
+        continue;
       }
+      buf[fullLen] = '\0';
+      // publish до удаления из кольца: при сбое строка остаётся головой
+      // кольца — FIFO-порядок досылки не ломается (см. ревью #16)
+      if (!sink_->publish(buf)) return;
+      ring_.dropFront(/*countAsLost=*/false);
     }
   }
 
@@ -112,7 +116,7 @@ class EspLogger : public Print {
     if (line.length() == 0) return;
     String json = buildLogJson(line, F("info"));
     if (sink_ != nullptr && sink_->connected()) {
-      if (sink_->publish(json)) return;
+      if (sink_->publish(json.c_str())) return;
       // publish() отказал, хотя формально были на связи — падаем в кольцо,
       // без лога об этом (см. комментарий класса)
     }

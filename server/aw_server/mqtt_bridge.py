@@ -42,8 +42,16 @@ class MqttCmdPort:
         self._client = client
         self._topic = topic
 
-    def publish(self, payload: dict) -> None:
-        self._client.publish(self._topic, json.dumps(payload))
+    def publish(self, payload: dict) -> bool:
+        """False — брокер недоступен, Команда не ушла: вызывающий обязан честно
+        сказать об этом пользователю, а не подтверждать отправку (ревью #15:
+        «ложный ACK»). paho при QoS0 кладёт сообщение в очередь только при
+        живом соединении — rc говорит правду сразу."""
+        result = self._client.publish(self._topic, json.dumps(payload))
+        if result.rc != mqtt.MQTT_ERR_SUCCESS:
+            log.warning("Команда не опубликована в %s: rc=%s", self._topic, result.rc)
+            return False
+        return True
 
 
 class MqttBridge:
@@ -117,7 +125,12 @@ class MqttBridge:
                 return
 
             if msg.topic == self._state_topic:
-                result = self._router.handle_state_message(msg.payload, datetime.now(timezone.utc))
+                # msg.retain=True только у доставки из retained-хранилища при
+                # (ре)подписке; живые публикации ESP приходят с retain=False —
+                # так ядро отличает «свежий стейт» от «последний известный»
+                result = self._router.handle_state_message(
+                    msg.payload, datetime.now(timezone.utc), retained=bool(msg.retain)
+                )
                 if not result.ok:
                     log.warning(
                         "не удалось разобрать aw/state (%d байт): %s", len(msg.payload), result.reason

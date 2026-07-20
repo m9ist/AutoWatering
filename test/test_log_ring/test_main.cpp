@@ -102,6 +102,54 @@ void test_line_larger_than_buffer_is_dropped() {
   TEST_ASSERT_EQUAL_STRING("kept", popStr(ring).c_str());
 }
 
+// --- peek/dropFront: чтение без удаления (досылка с подтверждением,
+// см. EspLogger::flushPending — FIFO не ломается при сбое publish) ---
+
+void test_peek_does_not_remove_line() {
+  LogRing ring(256);
+  ring.push("first", 5);
+  ring.push("second", 6);
+
+  char buf[64];
+  // peek возвращает полную длину и не трогает кольцо — повторный peek
+  // отдаёт ту же голову (как при неудавшейся публикации)
+  TEST_ASSERT_EQUAL(5, ring.peek(buf, sizeof(buf) - 1));
+  TEST_ASSERT_EQUAL_STRING_LEN("first", buf, 5);
+  TEST_ASSERT_EQUAL(2, ring.size());
+  TEST_ASSERT_EQUAL(5, ring.peek(buf, sizeof(buf) - 1));
+  TEST_ASSERT_EQUAL_STRING_LEN("first", buf, 5);
+
+  // dropFront(false) — доставлено, потерей не считается
+  ring.dropFront(false);
+  TEST_ASSERT_EQUAL(1, ring.size());
+  TEST_ASSERT_EQUAL_UINT32(0, ring.lostCount());
+  TEST_ASSERT_EQUAL(6, ring.peek(buf, sizeof(buf) - 1));
+  TEST_ASSERT_EQUAL_STRING_LEN("second", buf, 6);
+}
+
+void test_peek_reports_full_length_when_buffer_too_small() {
+  LogRing ring(256);
+  ring.push("0123456789", 10);
+
+  char buf[8];
+  // полная длина больше maxLen — вызывающий узнаёт об этом и может
+  // выбросить строку как потерянную, не публикуя обрезанный JSON
+  TEST_ASSERT_EQUAL(10, ring.peek(buf, 4));
+  TEST_ASSERT_EQUAL_STRING_LEN("0123", buf, 4);
+
+  ring.dropFront(true);  // не доставлена — в счётчик потерь
+  TEST_ASSERT_TRUE(ring.empty());
+  TEST_ASSERT_EQUAL_UINT32(1, ring.lostCount());
+}
+
+void test_peek_empty_ring_returns_zero() {
+  LogRing ring(64);
+  char buf[8];
+  TEST_ASSERT_EQUAL(0, ring.peek(buf, sizeof(buf)));
+  ring.dropFront(false);  // на пустом кольце — no-op, не падает
+  TEST_ASSERT_TRUE(ring.empty());
+}
+
 int main() {
   UNITY_BEGIN();
 
@@ -111,6 +159,9 @@ int main() {
   RUN_TEST(test_overflow_counts_multiple_losses);
   RUN_TEST(test_lost_count_reset_after_marker);
   RUN_TEST(test_line_larger_than_buffer_is_dropped);
+  RUN_TEST(test_peek_does_not_remove_line);
+  RUN_TEST(test_peek_reports_full_length_when_buffer_too_small);
+  RUN_TEST(test_peek_empty_ring_returns_zero);
 
   return UNITY_END();
 }

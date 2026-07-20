@@ -30,11 +30,18 @@ def _touch_heartbeat() -> None:
 async def _hourly_summary_loop(router: Router, telegram_port: PtbTelegramPort, interval_s: int) -> None:
     while True:
         await asyncio.sleep(interval_s)
-        text = router.hourly_summary_text(datetime.now(timezone.utc))
-        if text is None:
-            log.info("часовая сводка пропущена: стейта нет или он устарел")
-            continue
-        await telegram_port.broadcast_async(text)
+        # create_task без наблюдателя: неожиданное исключение молча убило бы
+        # сводки навсегда (heartbeat остался бы здоровым) — ловим и живём дальше
+        try:
+            text = router.hourly_summary_text(datetime.now(timezone.utc))
+            if text is None:
+                log.info("часовая сводка пропущена: стейта нет или он устарел")
+                continue
+            await telegram_port.broadcast_async(text)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("ошибка часовой сводки, следующая попытка через %dс", interval_s)
 
 
 async def _run(cfg: config.Config, router: Router, loki_port: HttpLokiPort) -> None:

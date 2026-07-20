@@ -73,7 +73,12 @@ async def _apply(update: Update, result: CommandResult, cmd_port: MqttCmdPort) -
         log.info("игнорируем команду из чужого чата %s: %r", _chat_id(update), update.message.text)
         return
     if result.cmd_payload is not None:
-        cmd_port.publish(result.cmd_payload)
+        if not cmd_port.publish(result.cmd_payload):
+            # не подтверждаем то, что не ушло (ревью #15: «ложный ACK»)
+            await update.message.reply_text(
+                "Команда НЕ отправлена: брокер недоступен, попробуй позже."
+            )
+            return
     if result.reply_text is not None:
         await update.message.reply_text(result.reply_text)
 

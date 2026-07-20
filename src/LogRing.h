@@ -68,6 +68,37 @@ class LogRing {
     return copyLen;
   }
 
+  // Читает самую старую строку в out (до maxLen байт), НЕ удаляя её из
+  // кольца. Возвращает ПОЛНУЮ длину строки (может быть больше maxLen —
+  // вызывающий сам решает судьбу невлезающей строки), либо 0, если кольцо
+  // пусто. Пара peek/dropFront вместо pop позволяет удалять строку только
+  // после успешной отправки — FIFO-порядок не ломается при сбое.
+  size_t peek(char* out, size_t maxLen) const {
+    if (count_ == 0) return 0;
+    uint16_t len;
+    size_t pos = readLenAt(head_, len);
+    size_t copyLen = len < maxLen ? len : maxLen;
+    size_t p = pos;
+    for (size_t i = 0; i < copyLen; i++) {
+      out[i] = static_cast<char>(buf_[p]);
+      p = (p + 1) % capacity_;
+    }
+    return len;
+  }
+
+  // Удаляет самую старую строку (обычно после peek). countAsLost=true —
+  // строка не была доставлена (например, не влезла в буфер вызывающего)
+  // и должна попасть в счётчик потерь.
+  void dropFront(bool countAsLost) {
+    if (count_ == 0) return;
+    uint16_t len;
+    size_t pos = readLenAt(head_, len);
+    head_ = (pos + len) % capacity_;
+    used_ -= (kHeaderSize + len);
+    count_--;
+    if (countAsLost) lost_++;
+  }
+
   // сколько строк потеряно (вытеснены переполнением или не влезли целиком)
   // с последнего resetLostCount()
   uint32_t lostCount() const { return lost_; }
@@ -109,15 +140,7 @@ class LogRing {
     return (pos + 1) % capacity_;
   }
 
-  void dropOldest() {
-    if (count_ == 0) return;
-    uint16_t len;
-    size_t pos = readLenAt(head_, len);
-    head_ = (pos + len) % capacity_;
-    used_ -= (kHeaderSize + len);
-    count_--;
-    lost_++;
-  }
+  void dropOldest() { dropFront(/*countAsLost=*/true); }
 };
 
 #endif  // LOG_RING_H

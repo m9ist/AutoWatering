@@ -11,13 +11,15 @@ from datetime import datetime, timezone
 
 from aw_server.config import Config
 from aw_server.core import Router
-from aw_server.mqtt_bridge import MqttBridge
+from aw_server.mqtt_bridge import MqttBridge, MqttCmdPort
 
 
 @dataclass
 class _FakeMsg:
     topic: str
     payload: bytes
+    # paho выставляет retain=True у доставки из retained-хранилища при подписке
+    retain: bool = False
 
 
 class _RecordingLokiPort:
@@ -117,3 +119,44 @@ def test_online_topic_repeated_value_is_not_pushed_twice():
     bridge._on_message(None, None, _FakeMsg("aw/online", b"1"))
 
     assert len(loki_port.pushed) == 1
+
+
+def test_retained_state_delivery_is_not_considered_fresh():
+    # доставка retained при (ре)подписке: стейт сохраняется для /state, но не
+    # «омолаживается» — часовая сводка молчит, пока ESP не пришлёт живой стейт
+    bridge, router, _loki_port, _telegram_port = _bridge()
+
+    bridge._on_message(None, None, _FakeMsg("aw/state", b'{"t": 200}', retain=True))
+
+    assert router.hourly_summary_text(datetime.now(timezone.utc)) is None
+    reply = router.handle_state("-1", datetime.now(timezone.utc)).reply_text
+    assert "retained" in reply
+
+
+class _FakePublishResult:
+    def __init__(self, rc: int) -> None:
+        self.rc = rc
+
+
+class _FakePahoClient:
+    def __init__(self, rc: int) -> None:
+        self._rc = rc
+        self.published: list = []
+
+    def publish(self, topic, payload):
+        self.published.append((topic, payload))
+        return _FakePublishResult(self._rc)
+
+
+def test_cmd_port_returns_true_on_success():
+    port = MqttCmdPort(_FakePahoClient(rc=0), "aw/cmd")
+
+    assert port.publish({"c": "esp_daily"}) is True
+
+
+def test_cmd_port_returns_false_when_broker_unreachable():
+    # rc=4 — MQTT_ERR_NO_CONN: Команда не ушла, вызывающий не должен слать
+    # пользователю ложный ACK (ревью #15)
+    port = MqttCmdPort(_FakePahoClient(rc=4), "aw/cmd")
+
+    assert port.publish({"c": "esp_daily"}) is False

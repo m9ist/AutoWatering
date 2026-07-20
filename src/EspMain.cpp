@@ -28,12 +28,12 @@ const char* const MQTT_HOST = "192.168.1.146";
 const uint16_t MQTT_PORT = 1883;
 const char* const MQTT_TOPIC_ONLINE = "aw/online";
 const char* const MQTT_TOPIC_LOG = "aw/log/esp";
-// Команда от бота (issue #17), passthrough в UART после валидации границ
+// Команда от aw-server (issue #17), passthrough в UART после валидации границ
 const char* const MQTT_TOPIC_CMD = "aw/cmd";
 // Событие для человека (aw-server пересылает в Telegram) — отказы Команд,
 // графики, сообщения от Mega (бывший logTelegram/arduino_tg)
 const char* const MQTT_TOPIC_EVENT = "aw/event";
-// последний Стейт от Mega, retained — бот отвечает /state и шлёт часовую
+// последний Стейт от Mega, retained — aw-server отвечает /state и шлёт часовую
 // сводку из него без похода на ESP
 const char* const MQTT_TOPIC_STATE = "aw/state";
 // сколько строк из RAM-кольца лога досылаем за один тик loop() — чтобы не
@@ -49,8 +49,8 @@ class MqttLogSink : public ILogSink {
   MqttLogSink(PubSubClient& client, const char* topic)
       : client_(client), topic_(topic) {}
   bool connected() override { return client_.connected(); }
-  bool publish(const String& json) override {
-    return client_.publish(topic_, json.c_str());
+  bool publish(const char* json) override {
+    return client_.publish(topic_, json);
   }
 
  private:
@@ -62,10 +62,13 @@ WiFiClient mqttNetClient;
 PubSubClient mqttClient(mqttNetClient);
 MqttLogSink mqttLogSink(mqttClient, MQTT_TOPIC_LOG);
 
-// неблокирующий реконнект: одна попытка раз в интервал, без delay-циклов
+// реконнект по таймеру: одна попытка раз в интервал. Сам connect()
+// синхронный — при молчащем хосте блокирует loop() на таймаут TCP
+// (ограничен setTimeout в setup, ~2с) — честная цена PubSubClient,
+// «неблокирующим» это не назвать, но пауза ограничена и редка (раз в 5с
+// только пока брокер лежит).
 Timer timerMqttReconnect;
 const Duration intervalMqttReconnect = Timer::Seconds(5);
-bool mqttWasConnected = false;
 
 // точки для графиков собираются по своему таймеру (раньше были привязаны к
 // часовой отправке стейта в телеграм — этот канал снят, см. issue #13)
@@ -205,7 +208,7 @@ void mqttConnect() {
     mqttClient.publish(MQTT_TOPIC_ONLINE, "1", true);
     // Команда из aw/cmd, QoS1 (issue #17) — публикует aw-server только с
     // QoS0 (PubSubClient publish тоже без выбора QoS), но подписка на QoS1
-    // задаёт верхнюю границу, если это когда-нибудь изменится на стороне бота
+    // задаёт верхнюю границу, если это изменится на стороне aw-server
     mqttClient.subscribe(MQTT_TOPIC_CMD, 1);
     serialLog(F("MQTT connected"));
   } else {
@@ -230,6 +233,8 @@ void publishEvent(const char* type, const String& text) {
 
 // Как sendGraphsToTelegram() до #13: по одному Событию на растение (aw/event
 // вместо logTelegram) — телеграм лимитирует сообщение 4096 символами.
+// Работает внутри MQTT-колбэка: рендер 16 графиков + publish'и держат loop()
+// заметное время — так же, как раньше в телеграм-поллинге (не регресс).
 void handleGraphsCommand() {
   Graph graph = Graph(numPlants, numPlotPoints, logger);
   for (int i = 0; i < numPlotPoints; i++) {
@@ -286,7 +291,7 @@ void handleCmdMessage(const uint8_t* payload, unsigned int length) {
 }
 
 void onMqttMessage(char* topic, uint8_t* payload, unsigned int length) {
-  if ((String)topic == MQTT_TOPIC_CMD) {
+  if (strcmp(topic, MQTT_TOPIC_CMD) == 0) {
     handleCmdMessage(payload, length);
   }
 }
@@ -296,13 +301,7 @@ void onMqttMessage(char* topic, uint8_t* payload, unsigned int length) {
 // и порционная досылка RAM-кольца лога после реконнекта.
 void mqttLoop() {
   mqttClient.loop();
-  bool connectedNow = mqttClient.connected();
-  if (connectedNow && !mqttWasConnected) {
-    logger.onMqttReconnected();
-  }
-  mqttWasConnected = connectedNow;
-
-  if (!connectedNow) {
+  if (!mqttClient.connected()) {
     if (timerMqttReconnect.expired()) {
       timerMqttReconnect.setDuration(intervalMqttReconnect);
       mqttConnect();
@@ -310,6 +309,7 @@ void mqttLoop() {
     return;
   }
 
+  // маркер потерь и досылка кольца — внутри flushPending (см. EspLogger.h)
   logger.flushPending(MQTT_FLUSH_LINES_PER_TICK);
 }
 
@@ -370,6 +370,9 @@ void setup() {
   checkWifi();
   setupOTA();
 
+  // таймаут TCP-connect/read: PubSubClient::connect синхронный, без этого
+  // молчащий хост держал бы loop() ~5с на каждой попытке реконнекта
+  mqttNetClient.setTimeout(2000);
   mqttClient.setServer(MQTT_HOST, MQTT_PORT);
   mqttClient.setBufferSize(1024);  // state-JSON больше дефолтных 256Б (#17)
   mqttClient.setKeepAlive(30);
@@ -448,8 +451,8 @@ void processMessageArduino(String message) {
         }
       }
 
-      // retained aw/state (issue #17): бот отвечает /state и шлёт часовую
-      // сводку из последнего retained-сообщения, без похода на ESP
+      // retained aw/state (issue #17): aw-server отвечает /state и шлёт
+      // часовую сводку из последнего retained-сообщения, без похода на ESP
       JsonDocument stateDoc = serializeState(lastState);
       String stateJson;
       serializeJson(stateDoc, stateJson);
@@ -459,8 +462,15 @@ void processMessageArduino(String message) {
     } else if ((String)ARDUINO_SEND_TELEGRAM == command) {
       // раньше пересылалось в телеграм (logTelegram) — теперь Событие в
       // aw/event, доставляет aw-server (issue #17)
-      const char* message = doc[F("message")];
-      publishEvent("event", message);
+      const char* tgMessage = doc[F("message")];
+      if (tgMessage == nullptr || tgMessage[0] == '\0') {
+        // arduino_tg без message: aw-server молча дропает пустой text —
+        // след должен остаться хотя бы в логах (ревью: «уведомление
+        // исчезает без следа»)
+        serialError(F("arduino_tg without message field"));
+      } else {
+        publishEvent("event", tgMessage);
+      }
     } else {
       serialError((String)F("Unknown command ") + command);
       serialLog(message);

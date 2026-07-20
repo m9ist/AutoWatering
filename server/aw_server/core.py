@@ -92,7 +92,11 @@ class StateStored:
 @dataclass
 class _StateSnapshot:
     raw: dict
-    received_at: datetime
+    # None — стейт пришёл как retained при (ре)подписке: брокер отдаёт
+    # последнее сохранённое сообщение заново, момент его реальной публикации
+    # ESP неизвестен. Такой стейт показываем в /state с оговоркой, но не
+    # считаем свежим (часовая сводка молчит), пока ESP не пришлёт живой.
+    received_at: datetime | None
 
 
 ONLINE_SERVICE = "esp-online"
@@ -156,6 +160,8 @@ class Router:
         try:
             value = payload.decode("ascii").strip()
         except UnicodeDecodeError:
+            # parse-with-default: не-ASCII в aw/online — мусор, а не переход;
+            # молча игнорируем, как и любые значения кроме "0"/"1" ниже
             return []
         if value not in ("0", "1"):
             return []
@@ -189,7 +195,12 @@ class Router:
         return [TelegramBroadcast(text=str(text))]
 
     # ---------------------------------------------------------------- issue #15: aw/state (retained)
-    def handle_state_message(self, payload: bytes, received_at: datetime) -> StateStored:
+    def handle_state_message(
+        self, payload: bytes, received_at: datetime, retained: bool = False
+    ) -> StateStored:
+        """retained=True — доставка из retained-хранилища брокера при (ре)подписке,
+        а не свежая публикация ESP: возраст неизвестен, свежим не считаем (иначе
+        реконнект aw-server «омолаживал» бы стейт мёртвого ESP на state_freshness)."""
         if not payload:
             # MQTT-идиома очистки retained-сообщения — пустой payload, не ошибка формата
             # (см. README стека watering, "Проверка": mosquitto_pub -r -n). Считаем, что
@@ -202,7 +213,7 @@ class Router:
             return StateStored(ok=False, reason=str(exc))
         if not isinstance(data, dict):
             return StateStored(ok=False, reason="payload — не JSON-объект")
-        self._state = _StateSnapshot(raw=data, received_at=received_at)
+        self._state = _StateSnapshot(raw=data, received_at=None if retained else received_at)
         return StateStored(ok=True)
 
     # ---------------------------------------------------------------- issue #15: команды
@@ -237,8 +248,9 @@ class Router:
 
     # ---------------------------------------------------------------- issue #15: планировщик бота
     def hourly_summary_text(self, now: datetime) -> str | None:
-        """None — сводку слать не нужно (стейта нет или он старше state_freshness)."""
-        if self._state is None:
+        """None — сводку слать не нужно (стейта нет, он из retained с неизвестным
+        возрастом, или старше state_freshness)."""
+        if self._state is None or self._state.received_at is None:
             return None
         age = now - self._state.received_at
         if age > self._state_freshness:
@@ -292,6 +304,12 @@ class Router:
     def _state_text(self, now: datetime) -> str:
         if self._state is None:
             return "Стейта нет: с ESP ещё не пришёл ни один aw/state."
+        if self._state.received_at is None:
+            return (
+                "Стейт из retained-хранилища брокера, возраст неизвестен "
+                "(aw-server перезапускался; свежий придёт с очередным стейтом ESP):\n"
+                + _render_state(self._state.raw, None)
+            )
         age = now - self._state.received_at
         if age > self._state_freshness:
             minutes = int(age.total_seconds() // 60)
@@ -362,13 +380,17 @@ def _timestamp(now: datetime) -> str:
     return now.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _render_state(raw: dict, age: timedelta) -> str:
+def _render_state(raw: dict, age: timedelta | None) -> str:
     """Человекочитаемый рендер UART-стейта (src/State.h::serializeState). Сырые ключи
     (t, h, ram, p[].{id,on,or,m}) читаются с .get() — частично битый/неполный JSON
-    не должен ронять /state или часовую сводку (MVP: остальное как есть, без валидации)."""
+    не должен ронять /state или часовую сводку (MVP: остальное как есть, без валидации).
+    age=None — возраст неизвестен (стейт из retained, см. handle_state_message)."""
 
-    minutes = int(age.total_seconds() // 60)
-    lines = [f"(получен {minutes} мин назад)"]
+    if age is None:
+        lines = []
+    else:
+        minutes = int(age.total_seconds() // 60)
+        lines = [f"(получен {minutes} мин назад)"]
 
     t = raw.get("t")
     if isinstance(t, (int, float)):
