@@ -3,6 +3,7 @@
 
 #include <ArduinoJson.h>
 #include <ArduinoOTA.h>
+#include <CmdHandler.h>
 #include <CommandParser.h>
 #include <Communication.h>
 #include <ESP8266WiFi.h>
@@ -27,6 +28,14 @@ const char* const MQTT_HOST = "192.168.1.146";
 const uint16_t MQTT_PORT = 1883;
 const char* const MQTT_TOPIC_ONLINE = "aw/online";
 const char* const MQTT_TOPIC_LOG = "aw/log/esp";
+// Команда от бота (issue #17), passthrough в UART после валидации границ
+const char* const MQTT_TOPIC_CMD = "aw/cmd";
+// Событие для человека (aw-server пересылает в Telegram) — отказы Команд,
+// графики, сообщения от Mega (бывший logTelegram/arduino_tg)
+const char* const MQTT_TOPIC_EVENT = "aw/event";
+// последний Стейт от Mega, retained — бот отвечает /state и шлёт часовую
+// сводку из него без похода на ESP
+const char* const MQTT_TOPIC_STATE = "aw/state";
 // сколько строк из RAM-кольца лога досылаем за один тик loop() — чтобы не
 // блокировать UART-обмен с Mega при большой досылке после реконнекта
 const uint8_t MQTT_FLUSH_LINES_PER_TICK = 3;
@@ -139,19 +148,23 @@ void serialTimeSynced() {
 
 void serialError(const String& s) { serialLog(ESP_COMMAND_LOG, s); }
 
+String plantCommandRejectReason() {
+  return (String)F("Rejected: plant id must be 0..") + (PLANTS_AMOUNT - 1) +
+         F(", amount 0..") + MAX_WATER_AMOUNT_ML + F("ml");
+}
+
 // Границы значений проверяем ещё на ESP: на Mega int 16-битный, без этой
 // проверки plant65536 усекался бы до валидного id. Mega проверяет тоже
 // (защита своего протокола), но с менее внятным сообщением пользователю.
-// Сейчас не вызывается (телеграм-канал снят, см. issue #13) — понадобится
-// для валидации команд из aw/cmd (MQTT), см. issue #17.
+// Арифметика границ — в CmdHandler.h::isPlantCommandInBounds (тестируется
+// native); эта функция остаётся Arduino-обёрткой с прежним сайд-эффектом
+// (лог отказа) — вызывается из handleCmdMessage при разборе aw/cmd (issue #17).
 bool checkPlantCommandBounds(int id, int amount) {
-  if (id >= 0 && id < PLANTS_AMOUNT && amount >= 0 &&
-      amount <= MAX_WATER_AMOUNT_ML) {
+  if (cmdhandler::isPlantCommandInBounds(id, amount, PLANTS_AMOUNT,
+                                         MAX_WATER_AMOUNT_ML)) {
     return true;
   }
-  serialLog((String)F("Rejected: plant id must be 0..") +
-            (PLANTS_AMOUNT - 1) + F(", amount 0..") + MAX_WATER_AMOUNT_ML +
-            F("ml"));
+  serialLog(plantCommandRejectReason());
   return false;
 }
 
@@ -190,9 +203,91 @@ void mqttConnect() {
                           /*willQos=*/1, /*willRetain=*/true, "0");
   if (ok) {
     mqttClient.publish(MQTT_TOPIC_ONLINE, "1", true);
+    // Команда из aw/cmd, QoS1 (issue #17) — публикует aw-server только с
+    // QoS0 (PubSubClient publish тоже без выбора QoS), но подписка на QoS1
+    // задаёт верхнюю границу, если это когда-нибудь изменится на стороне бота
+    mqttClient.subscribe(MQTT_TOPIC_CMD, 1);
     serialLog(F("MQTT connected"));
   } else {
     serialLog((String)F("MQTT connect failed, rc=") + mqttClient.state());
+  }
+}
+
+// aw/event — Событие для человека (доставляет aw-server в Telegram): отказы
+// Команд, ASCII-графики, сообщения от Mega (бывший logTelegram/arduino_tg).
+// При офлайне брокера публикация просто теряется (осознанно — в RAM-кольцо
+// уходят только логи, см. EspLogger.h) — неудачу логируем через логгер.
+void publishEvent(const char* type, const String& text) {
+  JsonDocument json;
+  json[F("type")] = type;
+  json[F("text")] = text;
+  String out;
+  serializeJson(json, out);
+  if (!mqttClient.publish(MQTT_TOPIC_EVENT, out.c_str())) {
+    serialLog((String)F("Failed to publish aw/event: ") + out);
+  }
+}
+
+// Как sendGraphsToTelegram() до #13: по одному Событию на растение (aw/event
+// вместо logTelegram) — телеграм лимитирует сообщение 4096 символами.
+void handleGraphsCommand() {
+  Graph graph = Graph(numPlants, numPlotPoints, logger);
+  for (int i = 0; i < numPlotPoints; i++) {
+    for (int p = 0; p < PLANTS_AMOUNT; p++) {
+      if (lastPlotPoints[i].pp[p] < UNDEFINED_PLANT_VALUE) {
+        graph.addPoint(p, i, lastPlotPoints[i].pp[p]);
+      }
+    }
+  }
+  bool any = false;
+  for (int k = 0; k < graph.numGraphs(); k++) {
+    if (!graph.isUsed(k)) continue;
+    publishEvent("graphs", graph.plotOne(k));
+    any = true;
+  }
+  if (!any) publishEvent("graphs", F("No graph data yet"));
+}
+
+// Обработка aw/cmd (issue #17): разбор и распознавание команды — в
+// CmdHandler.h (тестируется native), границы id/объёма — через сохранённую
+// checkPlantCommandBounds; форвард в UART — как раньше (serialPlantCommand /
+// serialLog(ESP_COMMAND_*), сохранено с #13). Невалидная Команда — Событие-
+// отказ в aw/event и лог.
+void handleCmdMessage(const uint8_t* payload, unsigned int length) {
+  cmdhandler::Decision d =
+      cmdhandler::decideCmd((const char*)payload, length);
+  switch (d.action) {
+    case cmdhandler::Action::kWater:
+    case cmdhandler::Action::kConfig:
+      if (!checkPlantCommandBounds(d.plantId, d.amountMl)) {
+        publishEvent("reject", plantCommandRejectReason());
+        return;
+      }
+      serialPlantCommand(d.action == cmdhandler::Action::kWater
+                             ? ESP_COMMAND_WATER_PLANT
+                             : ESP_COMMAND_CONFIG_PLANT,
+                         d.plantId, d.amountMl);
+      return;
+    case cmdhandler::Action::kDaily:
+      serialLog(ESP_COMMAND_DAILY_TASK, F("From aw/cmd"));
+      return;
+    case cmdhandler::Action::kCheckValves:
+      serialLog(ESP_COMMAND_CHECK_VALVES, F("From aw/cmd"));
+      return;
+    case cmdhandler::Action::kGraphs:
+      handleGraphsCommand();
+      return;
+    case cmdhandler::Action::kReject:
+    default:
+      serialLog(d.reason);
+      publishEvent("reject", d.reason);
+      return;
+  }
+}
+
+void onMqttMessage(char* topic, uint8_t* payload, unsigned int length) {
+  if ((String)topic == MQTT_TOPIC_CMD) {
+    handleCmdMessage(payload, length);
   }
 }
 
@@ -278,6 +373,7 @@ void setup() {
   mqttClient.setServer(MQTT_HOST, MQTT_PORT);
   mqttClient.setBufferSize(1024);  // state-JSON больше дефолтных 256Б (#17)
   mqttClient.setKeepAlive(30);
+  mqttClient.setCallback(onMqttMessage);  // разбор входящих aw/cmd (#17)
   timerMqttReconnect.setDuration(intervalMqttReconnect);
   mqttConnect();
 
@@ -351,13 +447,20 @@ void processMessageArduino(String message) {
           pointsHolder.addPoint(i, lastState.plants[i].originalValue);
         }
       }
+
+      // retained aw/state (issue #17): бот отвечает /state и шлёт часовую
+      // сводку из последнего retained-сообщения, без похода на ESP
+      JsonDocument stateDoc = serializeState(lastState);
+      String stateJson;
+      serializeJson(stateDoc, stateJson);
+      if (!mqttClient.publish(MQTT_TOPIC_STATE, stateJson.c_str(), true)) {
+        serialLog((String)F("Failed to publish aw/state: ") + stateJson);
+      }
     } else if ((String)ARDUINO_SEND_TELEGRAM == command) {
-      // раньше пересылалось в телеграм (logTelegram) — канал снят (#13),
-      // просто логируем; событие для человека появится через aw/event
-      // после MQTT-слоя (#16/#17)
+      // раньше пересылалось в телеграм (logTelegram) — теперь Событие в
+      // aw/event, доставляет aw-server (issue #17)
       const char* message = doc[F("message")];
-      serialLog((String)F("Arduino message (telegram channel removed): ") +
-                message);
+      publishEvent("event", message);
     } else {
       serialError((String)F("Unknown command ") + command);
       serialLog(message);
