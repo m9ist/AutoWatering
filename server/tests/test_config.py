@@ -54,3 +54,13 @@ def test_load_parses_whitelist_with_multiple_chat_ids(monkeypatch):
     cfg = config.load()
 
     assert cfg.telegram_whitelist_chat_ids == frozenset({"-1", "42", "-7"})
+
+
+def test_load_whitespace_only_whitelist_raises(monkeypatch):
+    # " " проходит _require (truthy), но парсится в пустой whitelist — бот
+    # молча игнорировал бы все команды (ревью GLM, finding 2)
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("TELEGRAM_WHITELIST_CHAT_IDS", " , ")
+
+    with pytest.raises(RuntimeError, match="chat id"):
+        config.load()

@@ -369,3 +369,53 @@ def test_online_malformed_payload_is_ignored():
 
     assert router.handle_online_message(b"garbage", received_at_ns=1) == []
     assert router.handle_online_message(b"\xff\xfe", received_at_ns=1) == []
+
+
+# --------------------------------------------------------------------------- фиксы по ревью GLM
+
+
+def test_command_ack_warns_when_esp_offline():
+    # clean-session + QoS0: Команда при офлайн-ESP выбрасывается брокером —
+    # ACK без оговорки был бы ложным (ревью GLM, finding 1)
+    router = _router()
+    router.handle_online_message(b"0", received_at_ns=1)
+
+    result = router.handle_water(ALLOWED_CHAT, ["plant2", "50ml"], datetime.now(timezone.utc))
+
+    assert result.cmd_payload is not None
+    assert "офлайн" in result.reply_text
+
+
+def test_command_ack_has_no_warning_when_esp_online():
+    router = _router()
+    router.handle_online_message(b"1", received_at_ns=1)
+
+    result = router.handle_daily(ALLOWED_CHAT, datetime.now(timezone.utc))
+
+    assert "офлайн" not in result.reply_text
+
+
+def test_retained_state_with_same_payload_keeps_known_age():
+    # краткий реконнект paho: брокер переигрывает retained с тем же пейлоадом —
+    # известный живой возраст стейта не должен затираться (ревью GLM, finding 4)
+    router = _router(state_freshness=timedelta(hours=1))
+    received_at = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+    router.handle_state_message(b'{"t": 234}', received_at)
+
+    router.handle_state_message(b'{"t": 234}', received_at + timedelta(minutes=5), retained=True)
+
+    assert router.hourly_summary_text(received_at + timedelta(minutes=10)) is not None
+
+
+def test_retained_state_with_different_payload_resets_age_to_unknown():
+    router = _router(state_freshness=timedelta(hours=1))
+    received_at = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+    router.handle_state_message(b'{"t": 234}', received_at)
+
+    # пейлоад отличается: стейт публиковался, пока aw-server был отключён —
+    # данные новее кэша, но их реальный возраст неизвестен
+    router.handle_state_message(b'{"t": 250}', received_at + timedelta(minutes=5), retained=True)
+
+    assert router.hourly_summary_text(received_at + timedelta(minutes=10)) is None
+    reply = router.handle_state(ALLOWED_CHAT, received_at + timedelta(minutes=10)).reply_text
+    assert "250" not in reply or "retained" in reply

@@ -85,9 +85,10 @@ def main() -> None:
     # httpx (используется python-telegram-bot) на INFO логирует полный URL запроса,
     # включая TELEGRAM_BOT_TOKEN прямо в пути (https://api.telegram.org/bot<token>/...) —
     # такое нельзя пускать в docker logs/journald. Токен не секрет уровня пароля к БД,
-    # но даёт полный контроль над ботом, поэтому глушим этот логгер отдельно от общего
-    # log_level.
-    logging.getLogger("httpx").setLevel(logging.WARNING)
+    # но даёт полный контроль над ботом, поэтому глушим отдельно от общего log_level.
+    # httpcore и telegram могут светить те же URL на DEBUG — глушим и их (ревью GLM).
+    for noisy in ("httpx", "httpcore", "telegram"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)
 
     loki_port = HttpLokiPort(cfg.loki_url)
     router = Router(

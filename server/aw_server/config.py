@@ -45,4 +45,12 @@ def _require(name: str) -> str:
 
 
 def _parse_whitelist(value: str) -> frozenset[str]:
-    return frozenset(part.strip() for part in value.split(",") if part.strip())
+    parsed = frozenset(part.strip() for part in value.split(",") if part.strip())
+    if not parsed:
+        # " " или "," проходят _require (truthy), но дают пустой whitelist —
+        # бот выглядел бы живым, молча игнорируя все команды (ревью GLM)
+        raise RuntimeError(
+            "TELEGRAM_WHITELIST_CHAT_IDS не содержит ни одного chat id — "
+            "бот игнорировал бы все команды"
+        )
+    return parsed

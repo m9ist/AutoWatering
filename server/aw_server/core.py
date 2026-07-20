@@ -213,7 +213,17 @@ class Router:
             return StateStored(ok=False, reason=str(exc))
         if not isinstance(data, dict):
             return StateStored(ok=False, reason="payload — не JSON-объект")
-        self._state = _StateSnapshot(raw=data, received_at=None if retained else received_at)
+        if retained:
+            # Брокер переигрывает retained и при кратких реконнектах paho, не только
+            # при рестарте aw-server. Если пейлоад совпадает с кэшем — это тот же
+            # стейт, чей живой возраст мы уже знаем, не затираем его. Отличается —
+            # стейт публиковался, пока нас не было: данные берём, возраст честно
+            # неизвестен (ревью GLM).
+            if self._state is not None and self._state.raw == data:
+                return StateStored(ok=True)
+            self._state = _StateSnapshot(raw=data, received_at=None)
+            return StateStored(ok=True)
+        self._state = _StateSnapshot(raw=data, received_at=received_at)
         return StateStored(ok=True)
 
     # ---------------------------------------------------------------- issue #15: команды
@@ -291,7 +301,7 @@ class Router:
             "amountMl": amount,
         }
         return CommandResult(
-            reply_text=f"Команда отправлена: plant{plant_id}, {amount}мл",
+            reply_text=self._ack_text(f"Команда отправлена: plant{plant_id}, {amount}мл"),
             cmd_payload=payload,
         )
 
@@ -299,7 +309,15 @@ class Router:
         if not self.is_allowed(chat_id):
             return CommandResult(reply_text=None, ignored=True)
         payload = {COMMAND_KEY: esp_command, "timestamp": _timestamp(now)}
-        return CommandResult(reply_text=ack_text, cmd_payload=payload)
+        return CommandResult(reply_text=self._ack_text(ack_text), cmd_payload=payload)
+
+    def _ack_text(self, ack: str) -> str:
+        """ESP подключён clean-session с QoS0 — Команду, опубликованную при офлайн-ESP,
+        брокер просто выбрасывает. Подтверждать её без оговорки — ложный ACK (ревью GLM);
+        статус берём из retained aw/online (LWT прошивки)."""
+        if self._online == "0":
+            return ack + "\n⚠️ ESP офлайн (aw/online=0) — команда до него не дойдёт."
+        return ack
 
     def _state_text(self, now: datetime) -> str:
         if self._state is None:

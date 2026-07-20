@@ -32,5 +32,14 @@ class HttpLokiPort:
         try:
             response = self._session.post(self._url, json=body, timeout=self._timeout_s)
             response.raise_for_status()
+        except requests.HTTPError as exc:
+            # тело ответа — единственный способ увидеть причину 4xx из логов
+            # (например, отключённый allow_structured_metadata → 400 на каждый пуш)
+            log.exception(
+                "Loki отверг строку (%s, labels=%s): HTTP %s, body=%r",
+                self._url, effect.labels,
+                exc.response.status_code if exc.response is not None else "?",
+                exc.response.text[:500] if exc.response is not None else "",
+            )
         except requests.RequestException:
             log.exception("не удалось отправить строку в Loki (%s, labels=%s)", self._url, effect.labels)
