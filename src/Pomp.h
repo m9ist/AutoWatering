@@ -183,17 +183,19 @@ class Pomp {
   // обновляет включено ли юзером растение на тумблере
   // true - если было какое-то изменение
   bool updatePlantsState(State& state) {
+    bool wasUpdate = false;
     bool v = digitalRead(PIN_POMP_TURN_ON) != HIGH;
     if (v) {
       if (!state.pompIsOn) {
         state.pompIsOn = true;
+        wasUpdate = true;
       }
     } else {
       if (state.pompIsOn) {
         state.pompIsOn = false;
+        wasUpdate = true;
       }
     }
-    bool wasUpdate = false;
     for (int i = 0; i < PLANTS_AMOUNT; i++) {
       multiplexPlant(i);
       v = digitalRead(PIN_MULTIPLEXER_PLANT_TURN_ON_SIG) != HIGH;

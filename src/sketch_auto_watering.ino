@@ -143,6 +143,22 @@ void runDailyCommand() {
   sendTelegram((String)F("Daily task is completed. Free mem = ") + freeRam());
 }
 
+// Валидация команд с plantId/amountMl: id за пределами массива plants — это
+// запись в чужую память и bitWrite с UB (мог открыться случайный клапан),
+// amount без лимита — потоп от опечатки в Telegram.
+bool isValidPlantCommand(int id, int amount) {
+  if (id < 0 || id >= PLANTS_AMOUNT) {
+    sendTelegram((String)F("Rejected: bad plant id ") + id);
+    return false;
+  }
+  if (amount < 0 || amount > MAX_WATER_AMOUNT_ML) {
+    sendTelegram((String)F("Rejected: bad amount ") + amount + F("ml, max ") +
+                 MAX_WATER_AMOUNT_ML + F("ml"));
+    return false;
+  }
+  return true;
+}
+
 void processEspCommand(JsonDocument& doc) {
   const char* command = doc[COMMAND_KEY];
   if ((String)ESP_COMMAND_LOG == command) {
@@ -161,6 +177,7 @@ void processEspCommand(JsonDocument& doc) {
   if ((String)ESP_COMMAND_WATER_PLANT == command) {
     int id = doc[F("plantId")];
     int amount = doc[F("amountMl")];
+    if (!isValidPlantCommand(id, amount)) return;
     logger.buzzerCommand();
     waterPlant(id, amount);
     return;
@@ -169,6 +186,7 @@ void processEspCommand(JsonDocument& doc) {
   if ((String)ESP_COMMAND_CONFIG_PLANT == command) {
     int id = doc[F("plantId")];
     int amount = doc[F("amountMl")];
+    if (!isValidPlantCommand(id, amount)) return;
     global_state.plants[id].dailyAmountMl = amount;
     saveStateEEPROM();
     String info = "Current config: ";  // оборачивать в F нельзя, виснет...

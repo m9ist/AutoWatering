@@ -43,6 +43,22 @@ UniversalTelegramBot telegramBot(getTelegramBotToken(), espClient);
 // todo <<<<<<<<<<<<<<< по хорошему надо запоминать между запусками точку
 // общения, либо вообще на несколько точек завязаться
 String telegramChatId = "-5065686553";
+
+// Защита: команды принимаются только из чатов белого списка, остальные
+// игнорируются (иначе любой нашедший бота получает управление поливом).
+// TELEGRAM_WHITELIST_ENABLED = false — отключить защиту.
+const bool TELEGRAM_WHITELIST_ENABLED = true;
+const char* TELEGRAM_ALLOWED_CHAT_IDS[] = {"-5065686553"};
+
+bool isAllowedTelegramChat(const String& chatId) {
+  if (!TELEGRAM_WHITELIST_ENABLED) return true;
+  for (unsigned int i = 0; i < sizeof(TELEGRAM_ALLOWED_CHAT_IDS) /
+                                   sizeof(TELEGRAM_ALLOWED_CHAT_IDS[0]);
+       i++) {
+    if (chatId == TELEGRAM_ALLOWED_CHAT_IDS[i]) return true;
+  }
+  return false;
+}
 Timer timerTelegramCheck;
 const Duration repeatTelegramCheck = Timer::Seconds(10);
 
@@ -83,10 +99,10 @@ Communication comm = Communication(Serial, logger, true);
 String getTimestamp() {
   time_t now = time(nullptr);
   struct tm timeinfo;
-  gmtime_r(&now, &timeinfo);
+  localtime_r(&now, &timeinfo);
 
   char buffer[20];
-  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%SZ", &timeinfo);
+  strftime(buffer, sizeof(buffer), "%Y-%m-%d %H:%M:%S", &timeinfo);
   return String(buffer);
 }
 
@@ -142,7 +158,8 @@ void serialTimeSynced() {
   json[F("timestamp")] = getTimestamp();
   time_t now = time(nullptr);
   struct tm timeinfo;
-  gmtime_r(&now, &timeinfo);
+  // localtime, а не gmtime: в RTC ардуины и на экран должно уехать местное
+  localtime_r(&now, &timeinfo);
   serializeTimeInfo(timeinfo, json);
   String sendJson;
   serializeJson(json, sendJson);
@@ -369,6 +386,10 @@ void loopTelegram() {
   logTelegram(F("Got it"));
   for (int i = 0; i < numNewMessages; i++) {
     String chatId = telegramBot.messages[i].chat_id;
+    if (!isAllowedTelegramChat(chatId)) {
+      serialLog(F("Ignore message from not allowed chat ") + chatId);
+      continue;
+    }
     if (telegramChatId != chatId) {
       serialLog(F("Got new chatid ") + chatId);
       telegramChatId = chatId;
@@ -405,7 +426,8 @@ void setup() {
   setupOTA();
 
   serialLog(F("Start sync time"));
-  configTime("UTC+3", F("ntp6.ntp-servers.net	"), F("1.ru.pool.ntp.org"),
+  // POSIX TZ: знак инвертирован, московское UTC+3 записывается как MSK-3
+  configTime("MSK-3", F("ntp6.ntp-servers.net"), F("1.ru.pool.ntp.org"),
              F("ntp.ix.ru"));
   while (!isTimeInited()) {
     serialLog(F("Waiting for time sync..."));

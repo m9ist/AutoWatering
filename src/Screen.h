@@ -72,6 +72,9 @@ uint16_t getBackground(bool isGood) { return isGood ? GREEN : RED; }
 
 // всего помещается 12 строчек, последняя с доп сдвигом на 5 пикселей
 void loopScreen(State& globalState) {
+  // экран перерисован — дедупликация попапов должна забыть прошлый текст,
+  // иначе повторный попап с тем же сообщением не покажется
+  lastMessage = "";
 #ifdef SD_TURNED_OFF
   bool screenState = true;
 #elif

@@ -54,7 +54,7 @@ class Communication {
 
   void readMessageAfterCommunicationStart();
   bool timeOut(String ret) {
-    if (state == COMMUNICATION_TIME_OUT) {
+    if (state == STATE_TIMEOUT) {
 #ifdef DEBUG_LOG
       if (ret.length() > 0) {
         log.print(F("Got timeout status with message: "));

@@ -1,5 +1,16 @@
 #include "Communication.h"
 
+// Файл собирается и для Mega (AVR, аппаратный WDT на 8с), и для ESP8266
+// (там delay() сам кормит софтовый WDT). Ожидание чанка может длиться до
+// COMMUNICATION_TIME_OUT_CTN * COMMUNICATION_TIME_OUT = 5с, а чанков в
+// сообщении несколько — без сброса WDT деградация связи роняла Mega в ребут.
+#ifdef __AVR__
+#include <avr/wdt.h>
+#define COMM_WDT_RESET() wdt_reset()
+#else
+#define COMM_WDT_RESET()
+#endif
+
 // \0 null \r \a \b \f \v
 // https://forum.arduino.cc/t/printing-special-characters/97446
 
@@ -7,6 +18,7 @@ String Communication::readNextChunk() {
   int ctn = 0;
   String ret;
   while (ctn < COMMUNICATION_TIME_OUT_CTN) {
+    COMM_WDT_RESET();
     if (!serial.available()) {
       delay(COMMUNICATION_TIME_OUT);
       ctn++;

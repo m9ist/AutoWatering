@@ -11,6 +11,8 @@
 #define PLANTS_AMOUNT 16
 #define DATA_CHUNK_SIZE 62  // SERIAL_TX_BUFFER_SIZE
 #define UNDEFINED_PLANT_VALUE 1022
+// максимальный объём одной команды полива (и дневной нормы), защита от опечаток
+#define MAX_WATER_AMOUNT_ML 200
 
 #define COMMAND_KEY F("c")
 #define ESP_COMMAND_LOG F("esp_log")

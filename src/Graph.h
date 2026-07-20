@@ -239,6 +239,6 @@ class PointsHoler {
       }
     }
     // выдаем медианное значение
-    return _graphs[start + _ids[graphId] / 2 + (_ids[graphId] % 2)];
+    return _graphs[start + _ids[graphId] / 2];
   }
 };
