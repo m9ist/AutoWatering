@@ -26,7 +26,7 @@
 #define ARDUINO_COMMAND_STATE F("state")
 #define ARDUINO_SEND_TELEGRAM F("arduino_tg")
 
-#define EEPROM_VERSION 5
+#define EEPROM_VERSION 6
 
 // Изменил, обнови EEPROM_VERSION
 struct Plant {

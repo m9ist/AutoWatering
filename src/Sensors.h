@@ -28,7 +28,10 @@ class Sensors {
       digitalWrite(PIN_SERNSOR_S1, bitRead(i, 1));
       digitalWrite(PIN_SERNSOR_S2, bitRead(i, 2));
       digitalWrite(PIN_SERNSOR_S3, bitRead(i, 3));
-      // delay(50);
+      // Первый замер после переключения канала выбрасываем: вход АЦП ещё
+      // держит заряд предыдущего датчика (мультиплексер + высокоомный
+      // источник), первый analogRead частично показывает соседний канал.
+      analogRead(PIN_INPUT_SENSOR);
       int read = analogRead(PIN_INPUT_SENSOR);
       state.plants[i].originalValue = read;
     }

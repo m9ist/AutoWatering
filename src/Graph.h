@@ -11,7 +11,7 @@ class Graph {
  public:
   Graph(int numGraphs, int numPoints, Print& logger)
       : _num_graphs(numGraphs), _num_points(numPoints), log(logger) {
-    graphLength = min(graphLengthMax, numPoints);
+    graphLength = min((int)GRAPH_LENGTH_MAX, numPoints);
     _ids = new int[numGraphs];
     for (int i = 0; i < _num_graphs; i++) {
       _ids[i] = UNDEFINED_IDS;
@@ -53,86 +53,101 @@ class Graph {
     }
   }
 
+  int numGraphs() { return _num_graphs; }
+
+  // есть ли данные в слоте k (addPoint назначает слоты по мере появления)
+  bool isUsed(int k) { return k >= 0 && k < _num_graphs && _ids[k] != UNDEFINED_IDS; }
+
+  // ASCII-график одного растения (слот k). Телеграм лимитирует сообщение
+  // 4096 символами — отправлять лучше по одному графику за сообщение.
+  String plotOne(int k) {
+    String result;
+    // не VLA: фиксированные размеры, иначе изменение констант могло бы
+    // молча переполнить стек
+    int finalGraph[GRAPH_LENGTH_MAX];
+
+    int minValue = 1024;
+    int maxValue = 0;
+    // вычисляем значения графика
+    int x = 0;
+    double step = (double)graphLength / _num_points;
+    double value = 0;
+    int ctn = 0;
+
+    for (int i = 0; i < _num_points; i++) {
+      value += _graphs[k * _num_points + i];
+      ctn++;
+
+      // если следующая точка будет генерировать новую точку графика либо
+      // вообще текущая последняя скидываем точку
+      if ((x <= (i + 1) * step && x < graphLength - 1) ||
+          i == _num_points - 1) {
+        int finalValue = (int)(value / ctn);
+        maxValue = max(maxValue, finalValue);
+        minValue = min(minValue, finalValue);
+        finalGraph[x] = finalValue;
+
+        value = 0;
+        ctn = 0;
+        x++;
+      }
+    }
+
+    char out[GRAPH_HEIGHT][GRAPH_LENGTH_MAX];
+    for (int i = 0; i < GRAPH_HEIGHT; i++) {
+      for (int j = 0; j < graphLength; j++) {
+        out[i][j] = ' ';
+      }
+    }
+    int stepY = max(1, (maxValue - minValue) / (int)GRAPH_HEIGHT);
+    for (int i = 0; i < graphLength; i++) {
+      int j = min((finalGraph[i] - minValue) / stepY, (int)GRAPH_HEIGHT - 1);
+      out[j][i] = '*';
+    }
+
+    // просто рисуем график
+    result += F("plant number ");
+    result += _ids[k];
+    result += F("\n```\n");
+
+    for (int height = GRAPH_HEIGHT - 1; height >= 0; height--) {
+      int graphY = minValue + stepY * height + stepY / 2;
+      int add = 4 - len(graphY);
+      for (int i = 0; i < add; i++) {
+        result += ' ';
+      }
+      result += graphY;
+      result += '|';
+      for (int i = 0; i < graphLength; i++) {
+        result += out[height][i];
+      }
+      result += '\n';
+    }
+
+    result += F("    |");
+    for (int i = 0; i < graphLength; i++) {
+      result += '-';
+    }
+
+    result += F("\n     ");
+    int baseId = 1 - graphLength;
+    int xLabelStep = graphLength / graphXLabels;
+    for (int i = 0; i < graphXLabels; i++) {
+      int value = baseId + xLabelStep * i;
+      int add = xLabelStep - 1 - len(value);
+      result += value;
+      for (int i = 0; i < add; i++) {
+        result += ' ';
+      }
+    }
+    result += F("\n```\n");
+    return result;
+  }
+
   String plot() {
     String result;
     for (int k = 0; k < _num_graphs; k++) {
-      int finalGraph[graphLength];
-
-      int minValue = 1024;
-      int maxValue = 0;
-      // вычисляем значения графика
-      int x = 0;
-      double step = (double)graphLength / _num_points;
-      double value = 0;
-      int ctn = 0;
-
-      for (int i = 0; i < _num_points; i++) {
-        value += _graphs[k * _num_points + i];
-        ctn++;
-
-        // если следующая точка будет генерировать новую точку графика либо
-        // вообще текущая последняя скидываем точку
-        if ((x <= (i + 1) * step && x < graphLength - 1) ||
-            i == _num_points - 1) {
-          int finalValue = (int)(value / ctn);
-          maxValue = max(maxValue, finalValue);
-          minValue = min(minValue, finalValue);
-          finalGraph[x] = finalValue;
-
-          value = 0;
-          ctn = 0;
-          x++;
-        }
-      }
-
-      char out[graphHeight][graphLength];
-      for (int i = 0; i < graphHeight; i++) {
-        for (int j = 0; j < graphLength; j++) {
-          out[i][j] = ' ';
-        }
-      }
-      int stepY = max(1, (maxValue - minValue) / graphHeight);
-      for (int i = 0; i < graphLength; i++) {
-        int j = min((finalGraph[i] - minValue) / stepY, graphHeight - 1);
-        out[j][i] = '*';
-      }
-
-      // просто рисуем график
-      result += F("plant number ");
-      result += _ids[k];
-      result += F("\n```\n");
-
-      for (int height = graphHeight - 1; height >= 0; height--) {
-        int graphY = minValue + stepY * height + stepY / 2;
-        int add = 4 - len(graphY);
-        for (int i = 0; i < add; i++) {
-          result += ' ';
-        }
-        result += graphY;
-        result += '|';
-        for (char c : out[height]) {
-          result += c;
-        }
-        result += '\n';
-      }
-
-      result += F("    |");
-      for (int i = 0; i < graphLength; i++) {
-        result += '-';
-      }
-
-      result += F("\n     ");
-      int baseId = 1 - graphLength;
-      int xLabelStep = graphLength / graphXLabels;
-      for (int i = 0; i < graphXLabels; i++) {
-        int value = baseId + xLabelStep * i;
-        int add = xLabelStep - 1 - len(value);
-        result += value;
-        for (int i = 0; i < add; i++) {
-          result += ' ';
-        }
-      }
-      result += F("\n```\n");
+      result += plotOne(k);
     }
     return result;
   }
@@ -144,8 +159,7 @@ class Graph {
   int* _ids;
   Print& log;
 
-  int graphHeight = 10;
-  int graphLengthMax = 40;
+  enum { GRAPH_HEIGHT = 10, GRAPH_LENGTH_MAX = 40 };
   int graphLength;
   int graphXLabels;
 

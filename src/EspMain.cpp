@@ -296,7 +296,9 @@ bool parsePlantAmountCommand(const String& message, const String& prefix,
   return true;
 }
 
-String getGrapghString() {
+// Шлёт по одному графику на сообщение: телеграм лимитирует 4096 символов,
+// один общий текст на 8+ растений молча не отправлялся бы
+void sendGraphsToTelegram() {
   Graph graph = Graph(numPlants, numPlotPoints, logger);
   for (int i = 0; i < numPlotPoints; i++) {
     for (int p = 0; p < PLANTS_AMOUNT; p++) {
@@ -305,7 +307,13 @@ String getGrapghString() {
       }
     }
   }
-  return graph.plot();
+  bool any = false;
+  for (int k = 0; k < graph.numGraphs(); k++) {
+    if (!graph.isUsed(k)) continue;
+    logTelegram(graph.plotOne(k));
+    any = true;
+  }
+  if (!any) logTelegram(F("No graph data yet"));
 }
 
 void procesTelegramMessage(String message) {
@@ -327,8 +335,7 @@ void procesTelegramMessage(String message) {
 
   if (message == F("/graphs")) {
     serialLog(ESP_COMMAND_LOG, F("Got graph command"));
-    String g = getGrapghString();
-    logTelegram(g);
+    sendGraphsToTelegram();
     return;
   }
 

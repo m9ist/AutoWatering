@@ -55,6 +55,9 @@ void initScreen(AwLogging& logger) {
 }
 
 String lastMessage;
+// после попапа (или при смене фонового цвета) нужна полная заливка экрана
+bool screenNeedsFullRedraw = true;
+uint16_t lastScreenBack = 0;
 
 void drawScreenMessage(String message, AwLogging& logger) {
   if (lastMessage == message) return;
@@ -66,11 +69,22 @@ void drawScreenMessage(String message, AwLogging& logger) {
   lcd.setTextSize(3);
   lcd.setCursor(0, 0);
   lcd.print(message);
+  screenNeedsFullRedraw = true;
 }
 
 uint16_t getFont(bool isGood) { return BLACK; }
 
 uint16_t getBackground(bool isGood) { return isGood ? GREEN : RED; }
+
+// при textSize=2 на 240px помещается 20 символов
+#define SCREEN_LINE_CHARS 20
+
+// печатает строку, добитую пробелами до ширины экрана — так старый текст
+// затирается без fillScreen и экран не мигает
+void printPaddedLine(String s) {
+  while (s.length() < SCREEN_LINE_CHARS) s += ' ';
+  lcd.print(s);
+}
 
 // всего помещается 12 строчек, последняя с доп сдвигом на 5 пикселей
 void loopScreen(State& globalState) {
@@ -84,7 +98,13 @@ void loopScreen(State& globalState) {
 #endif
   uint16_t screenBack = getBackground(screenState);
   uint16_t screenFont = getFont(screenState);
-  lcd.fillScreen(screenBack);
+  // полная заливка — только при смене фона или после попапа; обычное
+  // обновление перерисовывает текст поверх (строки добиты пробелами)
+  if (screenNeedsFullRedraw || screenBack != lastScreenBack) {
+    lcd.fillScreen(screenBack);
+    screenNeedsFullRedraw = false;
+    lastScreenBack = screenBack;
+  }
   lcd.setTextColor(screenFont, screenBack);
   lcd.setTextSize(2);
 
@@ -94,26 +114,24 @@ void loopScreen(State& globalState) {
   int lineId = 0;
 
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
-  lcd.println(dateToString(globalState.lastSensorCheck));
+  printPaddedLine(dateToString(globalState.lastSensorCheck));
+
+  String tempLine;
+  tempLine += (int)globalState.temperature;
+  tempLine += (char)223;
+  tempLine += ' ';
+  tempLine += (int)globalState.humidity;
+  tempLine += '%';
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
-  lcd.print((int)globalState.temperature);
-  lcd.print((char)223);
-  lcd.print(' ');
-  lcd.print((int)globalState.humidity);
-  lcd.println('%');
+  printPaddedLine(tempLine);
 
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
-  lcd.print(F("Free memory: "));
-  lcd.println(globalState.freeMemorySize);
+  printPaddedLine((String)F("Free memory: ") + globalState.freeMemorySize);
 
-  // lcd.setCursor(stepx, stepy + lineHeight * lineId++);
-  // lcd.println(F("Next task runing"));
-  // lcd.setCursor(stepx, stepy + lineHeight * lineId++);
-  // lcd.println(dateToString(globalState.nextTaskRuning));
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
-  lcd.println(F("Start app date"));
+  printPaddedLine(F("Start app date"));
   lcd.setCursor(stepx, stepy + lineHeight * lineId++);
-  lcd.println(dateToString(globalState.startUpDate));
+  printPaddedLine(dateToString(globalState.startUpDate));
 
   String out = F("Sensors");
   for (int i = 0; i < 16; i++) {
@@ -123,8 +141,19 @@ void loopScreen(State& globalState) {
     out += '=';
     out += globalState.plants[i].originalValue;
   }
-  lcd.setCursor(stepx, stepy + lineHeight * lineId++);
-  lcd.println(out);
+  // строка датчиков раскладывается вручную по строкам 5..11 (раньше
+  // println сам переносил, но перенос не затирал старый текст)
+  unsigned int sensPos = 0;
+  for (; lineId <= 11; lineId++) {
+    String chunk;
+    if (sensPos < out.length()) {
+      chunk = out.substring(
+          sensPos, min(out.length(), sensPos + SCREEN_LINE_CHARS));
+      sensPos += SCREEN_LINE_CHARS;
+    }
+    lcd.setCursor(stepx, stepy + lineHeight * lineId);
+    printPaddedLine(chunk);
+  }
 
   lcd.setCursor(stepx, stepy + 5 + lineHeight * 12);
   lcd.setTextColor(getFont(globalState.sdInited),

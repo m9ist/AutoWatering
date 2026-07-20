@@ -37,10 +37,15 @@ void loadStateEEPROM() {
   int address = 0;
   int version;
   EEPROM.get(address, version);
-  if (version != EEPROM_VERSION) {
+  address += sizeof(int);
+  int storedSize;
+  EEPROM.get(address, storedSize);
+  address += sizeof(int);
+  // размер State проверяем вместе с версией: страховка от забытого
+  // bump'а EEPROM_VERSION при изменении структуры
+  if (version != EEPROM_VERSION || storedSize != (int)sizeof(State)) {
     Serial.println("Bad version of EEPROM in memory");
   } else {
-    address += sizeof(int);
     EEPROM.get(address, global_state);
     Serial.println("Loaded state from eeprom");
   }
@@ -50,6 +55,8 @@ void saveStateEEPROM() {
   int address = 0;
   int version = EEPROM_VERSION;
   EEPROM.put(address, version);
+  address += sizeof(int);
+  EEPROM.put(address, (int)sizeof(State));
   address += sizeof(int);
   EEPROM.put(address, global_state);
 #ifdef DEBUG_LOG

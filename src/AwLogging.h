@@ -18,6 +18,30 @@ class AwLogging {
   SoftSpiDriver<SD_MISO_PIN, SD_MOSI_PIN, SD_SCK_PIN> softSpi;
   FsFile file;
   bool _sdIsInited = false;
+  unsigned long _lastFlushMs = 0;
+  // Файл держим открытым, на карту сбрасываем раз в интервал: open/close
+  // на каждую строку — постоянная перезапись FAT (износ карты + латенси
+  // loop). Цена: при отвале питания теряется до 5с последних логов.
+  static const unsigned long FLUSH_INTERVAL_MS = 5000;
+
+  bool ensureFileOpen() {
+    if (file) return true;
+    file = sd.open("LOG.txt", FILE_WRITE);
+    if (!file) {
+      Serial.print(F("open file failed, sdErr=0x"));
+      Serial.print(sd.sdErrorCode(), HEX);
+      Serial.print(F(" data=0x"));
+      Serial.println(sd.sdErrorData(), HEX);
+      return false;
+    }
+    return true;
+  }
+
+  void flushIfNeeded() {
+    if (millis() - _lastFlushMs < FLUSH_INTERVAL_MS) return;
+    _lastFlushMs = millis();
+    file.flush();
+  }
 
   // int startup_melody[] = {784, 659, 523, 392};
   // int startup_note_durations[] = {300, 300, 400, 500};  // Последняя нота
@@ -56,6 +80,7 @@ class AwLogging {
 
     _sdIsInited = true;
     state.sdInited = true;
+    ensureFileOpen();
     Serial.println(F("SD is inited."));
   }
 
@@ -66,17 +91,9 @@ class AwLogging {
     if (SD_TURNED_OFF || !_sdIsInited) {
       return;
     }
-
-    file = sd.open("LOG.txt", FILE_WRITE);
-    if (!file) {
-      Serial.print(F("open file failed, sdErr=0x"));
-      Serial.print(sd.sdErrorCode(), HEX);
-      Serial.print(F(" data=0x"));
-      Serial.println(sd.sdErrorData(), HEX);
-    } else {
-      file.println(freeRamLogginBuffer);
-      file.close();
-    }
+    if (!ensureFileOpen()) return;
+    file.println(freeRamLogginBuffer);
+    flushIfNeeded();
   }
 
   void writeln(String dataString) {
@@ -84,17 +101,9 @@ class AwLogging {
     if (SD_TURNED_OFF || !_sdIsInited) {
       return;
     }
-
-    file = sd.open("LOG.txt", FILE_WRITE);
-    if (!file) {
-      Serial.print(F("open file failed, sdErr=0x"));
-      Serial.print(sd.sdErrorCode(), HEX);
-      Serial.print(F(" data=0x"));
-      Serial.println(sd.sdErrorData(), HEX);
-    } else {
-      file.println(dataString);
-      file.close();
-    }
+    if (!ensureFileOpen()) return;
+    file.println(dataString);
+    flushIfNeeded();
   }
 
   void buzzerCommand() {
