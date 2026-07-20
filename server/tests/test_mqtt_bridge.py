@@ -97,3 +97,23 @@ def test_broken_message_on_any_topic_does_not_raise():
     bridge._on_message(None, None, _FakeMsg("aw/event", b"\xff\xfe not json"))
     bridge._on_message(None, None, _FakeMsg("aw/state", b"\xff\xfe not json"))
     bridge._on_message(None, None, _FakeMsg("aw/log/esp", b"\xff\xfe not json"))
+    bridge._on_message(None, None, _FakeMsg("aw/online", b"\xff\xfe not json"))
+
+
+def test_online_topic_is_routed_to_loki():
+    bridge, _router, loki_port, telegram_port = _bridge()
+
+    bridge._on_message(None, None, _FakeMsg("aw/online", b"1"))
+
+    assert len(loki_port.pushed) == 1
+    assert loki_port.pushed[0].labels["service"] == "esp-online"
+    assert telegram_port.broadcasted == []
+
+
+def test_online_topic_repeated_value_is_not_pushed_twice():
+    bridge, _router, loki_port, _telegram_port = _bridge()
+
+    bridge._on_message(None, None, _FakeMsg("aw/online", b"1"))
+    bridge._on_message(None, None, _FakeMsg("aw/online", b"1"))
+
+    assert len(loki_port.pushed) == 1

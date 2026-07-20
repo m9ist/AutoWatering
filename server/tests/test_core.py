@@ -310,3 +310,62 @@ def test_hourly_summary_returns_text_when_state_is_fresh():
 
     assert text is not None
     assert "23.4" in text
+
+
+# --------------------------------------------------------------------------- issue #18
+# aw/online (retained LWT ESP, issue #16) -> лог-строка перехода в Loki.
+
+
+def test_online_first_value_becomes_loki_push():
+    router = Router()
+
+    effects = router.handle_online_message(b"1", received_at_ns=1)
+
+    assert effects == [
+        LokiPush(
+            labels={"stack": "watering", "service": "esp-online"},
+            timestamp_ns="1",
+            line="ESP online",
+            metadata={"level": "info", "online": "1"},
+        )
+    ]
+
+
+def test_online_offline_value_has_warning_level():
+    router = Router()
+
+    effects = router.handle_online_message(b"0", received_at_ns=1)
+
+    assert effects == [
+        LokiPush(
+            labels={"stack": "watering", "service": "esp-online"},
+            timestamp_ns="1",
+            line="ESP offline",
+            metadata={"level": "warning", "online": "0"},
+        )
+    ]
+
+
+def test_online_repeated_same_value_is_not_logged_again():
+    router = Router()
+    router.handle_online_message(b"1", received_at_ns=1)
+
+    effects = router.handle_online_message(b"1", received_at_ns=2)
+
+    assert effects == []
+
+
+def test_online_transition_is_logged():
+    router = Router()
+    router.handle_online_message(b"1", received_at_ns=1)
+
+    effects = router.handle_online_message(b"0", received_at_ns=2)
+
+    assert effects and effects[0].line == "ESP offline"
+
+
+def test_online_malformed_payload_is_ignored():
+    router = Router()
+
+    assert router.handle_online_message(b"garbage", received_at_ns=1) == []
+    assert router.handle_online_message(b"\xff\xfe", received_at_ns=1) == []

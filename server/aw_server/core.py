@@ -95,6 +95,9 @@ class _StateSnapshot:
     received_at: datetime
 
 
+ONLINE_SERVICE = "esp-online"
+
+
 _HELP_TEXT = (
     "/water plantX Yml — полить растение X объёмом Y мл (пример: /water plant3 50ml)\n"
     "/config plantX Yml — задать дневную норму растения X (пример: /config plant2 20ml)\n"
@@ -126,6 +129,7 @@ class Router:
         self._whitelist = whitelist_chat_ids
         self._state_freshness = state_freshness
         self._state: _StateSnapshot | None = None
+        self._online: str | None = None
 
     # ---------------------------------------------------------------- issue #14
     def handle_message(self, topic: str, payload: bytes, received_at_ns: int) -> list[LokiPush]:
@@ -136,6 +140,33 @@ class Router:
         line, level = _parse_log_payload(payload)
         labels = {"stack": STACK_LABEL, "service": service}
         metadata = {"level": level} if level else {}
+        return [LokiPush(labels=labels, timestamp_ns=str(received_at_ns), line=line, metadata=metadata)]
+
+    # ---------------------------------------------------------------- issue #18
+    def handle_online_message(self, payload: bytes, received_at_ns: int) -> list[LokiPush]:
+        """aw/online (retained LWT ESP, issue #16): "1"/"0" -> лог-строка перехода в Loki.
+
+        Логируем только смену состояния, не каждую доставку retained-сообщения —
+        иначе ресабскрайб aw-server (реконнект к брокеру) плодил бы дубли той же
+        строки без реального перехода ESP. Первое полученное значение (self._online
+        ещё None) тоже логируется — это текущий статус на момент старта aw-server.
+        "online" в structured metadata — не метка потока (сохраняем кардинальность
+        {stack, service} низкой), но доступен LogQL `| unwrap` для панели статуса.
+        """
+        try:
+            value = payload.decode("ascii").strip()
+        except UnicodeDecodeError:
+            return []
+        if value not in ("0", "1"):
+            return []
+        if value == self._online:
+            return []
+        self._online = value
+
+        is_online = value == "1"
+        labels = {"stack": STACK_LABEL, "service": ONLINE_SERVICE}
+        metadata = {"level": "info" if is_online else "warning", "online": value}
+        line = "ESP online" if is_online else "ESP offline"
         return [LokiPush(labels=labels, timestamp_ns=str(received_at_ns), line=line, metadata=metadata)]
 
     # ---------------------------------------------------------------- issue #15: whitelist

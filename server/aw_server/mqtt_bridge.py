@@ -2,10 +2,11 @@
 
 Тонкая обвязка без бизнес-логики — она в core.Router (см. tests/test_core.py).
 Один MQTT-клиент обслуживает обе роли aw-server: подписка aw/log/# (issue #14,
-пуш в Loki) и aw/event + aw/state (issue #15, телеграм-бот). Живой брокер здесь
-не тестируется юнит-тестами: устойчивость (reconnect) проверяется по критериям
-тикетов на деплое; ветвление по топику — в tests/test_mqtt_bridge.py на фейковых
-сообщениях, без сети.
+пуш в Loki) и aw/event + aw/state (issue #15, телеграм-бот), а также aw/online
+(issue #18, retained LWT ESP — переходы онлайн/офлайн тоже уходят в Loki).
+Живой брокер здесь не тестируется юнит-тестами: устойчивость (reconnect)
+проверяется по критериям тикетов на деплое; ветвление по топику — в
+tests/test_mqtt_bridge.py на фейковых сообщениях, без сети.
 """
 
 from __future__ import annotations
@@ -60,6 +61,7 @@ class MqttBridge:
         self._log_topic = cfg.mqtt_topic_prefix + "log/#"
         self._event_topic = cfg.mqtt_topic_prefix + "event"
         self._state_topic = cfg.mqtt_topic_prefix + "state"
+        self._online_topic = cfg.mqtt_topic_prefix + "online"
         self.cmd_topic = cfg.mqtt_topic_prefix + "cmd"
 
         self._client = mqtt.Client(
@@ -94,10 +96,11 @@ class MqttBridge:
         client.subscribe(self._log_topic)
         client.subscribe(self._event_topic)
         client.subscribe(self._state_topic)
+        client.subscribe(self._online_topic)
         log.info(
-            "подключены к брокеру %s:%s, подписаны на %s, %s, %s",
+            "подключены к брокеру %s:%s, подписаны на %s, %s, %s, %s",
             self._cfg.mqtt_host, self._cfg.mqtt_port,
-            self._log_topic, self._event_topic, self._state_topic,
+            self._log_topic, self._event_topic, self._state_topic, self._online_topic,
         )
 
     def _on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties=None) -> None:
@@ -119,6 +122,11 @@ class MqttBridge:
                     log.warning(
                         "не удалось разобрать aw/state (%d байт): %s", len(msg.payload), result.reason
                     )
+                return
+
+            if msg.topic == self._online_topic:
+                for effect in self._router.handle_online_message(msg.payload, time.time_ns()):
+                    self._loki_port.push(effect)
                 return
 
             received_at_ns = time.time_ns()
