@@ -1,5 +1,11 @@
 # Внедрение MQTT (Dealgate) в автополив — план реализации
 
+> ⚠️ **Superseded 2026-07-20:** прямое подключение ESP к Dealgate отменено —
+> ESP говорит только с локальным Mosquitto ([ADR-0001](../docs/adr/0001-local-mqtt-broker.md)),
+> Алиса — потом мостом на серваке. Актуальный план:
+> [`2026-07-20_mqtt_server_migration.md`](./2026-07-20_mqtt_server_migration.md).
+> Исследование Dealgate (лимиты, умения, JSON key) остаётся полезным для будущего моста.
+
 Дата: 2026-07-04
 Продолжение исследования: [`2026-05-26_yandex_alice_integration.md`](./2026-05-26_yandex_alice_integration.md)
 
