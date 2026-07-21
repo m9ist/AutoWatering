@@ -66,15 +66,23 @@ async def _run(cfg: config.Config, router: Router, loki_port: HttpLokiPort) -> N
             "aw-server запущен: log-bridge (%slog/#) + телеграм-бот (whitelist: %d чат(ов))",
             cfg.mqtt_topic_prefix, len(cfg.telegram_whitelist_chat_ids),
         )
-        summary_task = asyncio.create_task(
-            _hourly_summary_loop(router, telegram_port, cfg.hourly_summary_interval_s)
-        )
+        # HOURLY_SUMMARY_INTERVAL_S <= 0 — периодическая сводка отключена
+        # (введено по просьбе владельца; вернуть — выставить интервал в env)
+        summary_task = None
+        if cfg.hourly_summary_interval_s > 0:
+            summary_task = asyncio.create_task(
+                _hourly_summary_loop(router, telegram_port, cfg.hourly_summary_interval_s)
+            )
+        else:
+            log.info("периодическая сводка отключена (HOURLY_SUMMARY_INTERVAL_S=%d)",
+                     cfg.hourly_summary_interval_s)
         try:
             while True:
                 _touch_heartbeat()
                 await asyncio.sleep(HEARTBEAT_INTERVAL_S)
         finally:
-            summary_task.cancel()
+            if summary_task is not None:
+                summary_task.cancel()
             await application.updater.stop()
             await application.stop()
 

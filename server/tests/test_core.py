@@ -457,3 +457,31 @@ def test_state_without_known_fields_produces_no_pushes():
 
     assert stored.ok is True
     assert stored.pushes == ()
+
+
+# --------------------------------------------------------------------------- уведомления о переходах aw/online
+
+
+def test_online_transition_broadcasts_to_chat():
+    # замена старого «Esp started successfully» из телеграм-эпохи: переход
+    # offline->online уведомляет чат; LWT даёт и офлайн-сторону
+    router = Router()
+    router.handle_online_message(b"1", received_at_ns=1)
+
+    offline = router.handle_online_message(b"0", received_at_ns=2)
+    online = router.handle_online_message(b"1", received_at_ns=3)
+
+    assert [e.text for e in offline if isinstance(e, TelegramBroadcast)] == [
+        "⚠️ ESP офлайн (сработал LWT брокера)."
+    ]
+    assert [e.text for e in online if isinstance(e, TelegramBroadcast)] == ["ESP снова онлайн."]
+
+
+def test_online_first_value_does_not_broadcast():
+    # первая retained-доставка при старте aw-server — текущий статус, не переход:
+    # рестарт сервиса не должен спамить в чат
+    router = Router()
+
+    effects = router.handle_online_message(b"1", received_at_ns=1)
+
+    assert not any(isinstance(e, TelegramBroadcast) for e in effects)

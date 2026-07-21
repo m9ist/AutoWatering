@@ -20,7 +20,7 @@ from typing import Protocol
 import paho.mqtt.client as mqtt
 
 from .config import Config
-from .core import Router
+from .core import Router, TelegramBroadcast
 from .loki import HttpLokiPort
 
 log = logging.getLogger(__name__)
@@ -142,7 +142,12 @@ class MqttBridge:
 
             if msg.topic == self._online_topic:
                 for effect in self._router.handle_online_message(msg.payload, time.time_ns()):
-                    self._loki_port.push(effect)
+                    # переход даёт лог-строку в Loki и (кроме первого значения
+                    # после старта) уведомление в чат
+                    if isinstance(effect, TelegramBroadcast):
+                        self._telegram_port.broadcast(effect.text)
+                    else:
+                        self._loki_port.push(effect)
                 return
 
             received_at_ns = time.time_ns()

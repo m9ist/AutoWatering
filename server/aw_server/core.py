@@ -156,13 +156,20 @@ class Router:
         return [LokiPush(labels=labels, timestamp_ns=str(received_at_ns), line=line, metadata=metadata)]
 
     # ---------------------------------------------------------------- issue #18
-    def handle_online_message(self, payload: bytes, received_at_ns: int) -> list[LokiPush]:
-        """aw/online (retained LWT ESP, issue #16): "1"/"0" -> лог-строка перехода в Loki.
+    def handle_online_message(
+        self, payload: bytes, received_at_ns: int
+    ) -> list[LokiPush | TelegramBroadcast]:
+        """aw/online (retained LWT ESP, issue #16): "1"/"0" -> лог-строка перехода в Loki
+        + уведомление в чат.
 
         Логируем только смену состояния, не каждую доставку retained-сообщения —
         иначе ресабскрайб aw-server (реконнект к брокеру) плодил бы дубли той же
         строки без реального перехода ESP. Первое полученное значение (self._online
-        ещё None) тоже логируется — это текущий статус на момент старта aw-server.
+        ещё None) логируется в Loki — это текущий статус на момент старта aw-server —
+        но в чат НЕ уходит: рестарт aw-server не должен спамить «ESP онлайн» без
+        реального перехода. Уведомление в чат (замена старого «Esp started
+        successfully» из телеграм-эпохи) — только на переходе с известного значения;
+        LWT даёт и офлайн-сторону, которой раньше не было.
         "online" в structured metadata — не метка потока (сохраняем кардинальность
         {stack, service} низкой), но доступен LogQL `| unwrap` для панели статуса.
         """
@@ -176,13 +183,21 @@ class Router:
             return []
         if value == self._online:
             return []
+        previous = self._online
         self._online = value
 
         is_online = value == "1"
         labels = {"stack": STACK_LABEL, "service": ONLINE_SERVICE}
         metadata = {"level": "info" if is_online else "warning", "online": value}
         line = "ESP online" if is_online else "ESP offline"
-        return [LokiPush(labels=labels, timestamp_ns=str(received_at_ns), line=line, metadata=metadata)]
+        effects: list[LokiPush | TelegramBroadcast] = [
+            LokiPush(labels=labels, timestamp_ns=str(received_at_ns), line=line, metadata=metadata)
+        ]
+        if previous is not None:
+            effects.append(TelegramBroadcast(
+                text="ESP снова онлайн." if is_online else "⚠️ ESP офлайн (сработал LWT брокера)."
+            ))
+        return effects
 
     # ---------------------------------------------------------------- issue #15: whitelist
     def is_allowed(self, chat_id: str) -> bool:
