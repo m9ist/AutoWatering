@@ -28,12 +28,14 @@ constexpr const char* kCmdWater = "esp_water";
 constexpr const char* kCmdConfig = "esp_plant_conf";
 constexpr const char* kCmdDaily = "esp_daily";
 constexpr const char* kCmdCheckValves = "esp_check_valves";
+constexpr const char* kCmdSwitchPump = "esp_pump";
 
 enum class Action {
   kWater,        // форвард в UART: serialPlantCommand(ESP_COMMAND_WATER_PLANT, ...)
   kConfig,       // форвард в UART: serialPlantCommand(ESP_COMMAND_CONFIG_PLANT, ...)
   kDaily,        // форвард в UART без id/amount
   kCheckValves,  // форвард в UART без id/amount
+  kSwitchPump,   // форвард в UART без id/amount: переключить активную помпу
   kReject,       // отказ на уровне JSON/имени команды, текст — в reason
 };
 
@@ -82,6 +84,10 @@ inline Decision decideCmd(const char* payload, size_t length) {
   }
   if (strcmp(command, kCmdCheckValves) == 0) {
     d.action = Action::kCheckValves;
+    return d;
+  }
+  if (strcmp(command, kCmdSwitchPump) == 0) {
+    d.action = Action::kSwitchPump;
     return d;
   }
 

@@ -33,6 +33,7 @@ CMD_WATER = "esp_water"
 CMD_CONFIG = "esp_plant_conf"
 CMD_DAILY = "esp_daily"
 CMD_CHECK_VALVES = "esp_check_valves"
+CMD_SWITCH_PUMP = "esp_pump"
 
 PLANTS_AMOUNT = 16
 MAX_WATER_AMOUNT_ML = 200
@@ -112,6 +113,7 @@ _HELP_TEXT = (
     "/config plantX Yml — задать дневную норму растения X (пример: /config plant2 20ml)\n"
     "/daily — дневной полив всех растений по нормам\n"
     "/checkvalves — проверить, что клапаны физически подключены\n"
+    "/pump — переключить активную помпу на другую (результат — в /state)\n"
     "/state — последний известный стейт системы (из retained aw/state)\n"
     "/help — это сообщение\n"
     "Графики влажности/климата — в Grafana (дашборд «Автополив»)"
@@ -314,6 +316,17 @@ class Router:
             chat_id, CMD_CHECK_VALVES, "Отправлена команда проверки клапанов.", now
         )
 
+    def handle_pump(self, chat_id: str, now: datetime) -> CommandResult:
+        """Переключить активную помпу на другую (issue #22).
+
+        Аргумента нет и эха от Mega нет: прошивка применяет команду, пишет в
+        EEPROM и поднимает updated — новая активная помпа приезжает очередным
+        aw/state и видна в /state. Обратная сторона такой краткости: две
+        команды подряд возвращают на исходную помпу, и оба ответа выглядят
+        одинаково успешно.
+        """
+        return self._simple_command(chat_id, CMD_SWITCH_PUMP, "Команда отправлена.", now)
+
     def handle_state(self, chat_id: str, now: datetime) -> CommandResult:
         if not self.is_allowed(chat_id):
             return CommandResult(reply_text=None, ignored=True)
@@ -461,6 +474,71 @@ def _timestamp(now: datetime) -> str:
     return now.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _plural_ru(n: int, one: str, few: str, many: str) -> str:
+    if 11 <= n % 100 <= 14:
+        return many
+    last = n % 10
+    if last == 1:
+        return one
+    if 2 <= last <= 4:
+        return few
+    return many
+
+
+def _ago(seconds: int) -> str:
+    if seconds < 0:
+        # часы Mega прыгнули назад (пересинк NTP через esp_ntp) — возраст
+        # считать не по чему, честнее сказать «только что», чем «-3 дня назад»
+        return "только что"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} мин назад"
+    hours = minutes // 60
+    if hours < 48:
+        return f"{hours} {_plural_ru(hours, 'час', 'часа', 'часов')} назад"
+    days = hours // 24
+    return f"{days} {_plural_ru(days, 'день', 'дня', 'дней')} назад"
+
+
+def _render_pumps(raw: dict) -> list[str]:
+    """Блок помп из кадра Mega (issue #22): активная + результат последнего
+    пуска каждой. Вердикт «резервная жива» человек выносит сам по этим числам,
+    автоматики нет (см. ADR-0002) — поэтому и объём, и возраст: «pump1: 0мл»
+    без времени одинаково врёт про «сдохла вчера» и «месяц не пробовалась».
+
+    Возраст считаем в часах Mega (поле now из того же кадра), не сводя своё
+    время с RTC ардуины. Всё читается через .get(): частично битый кадр не
+    должен ронять /state (та же политика, что у остального рендера)."""
+
+    active = raw.get("pmp")
+    # type(...) is int, а не isinstance/in: 1.0 == 1 и True == 1, поэтому
+    # проверка на вхождение пропустила бы float дальше, и он упал бы индексом
+    # списка уже внутри рендера. Кадр aw/state retained, у брокера пока нет ACL
+    # (issue #19) — один такой кадр вешал бы /state и часовую сводку до
+    # следующего живого стейта (ревью GLM).
+    if type(active) is not int or active not in (0, 1):
+        return []
+
+    ml = raw.get("pml")
+    at = raw.get("pat")
+    now_epoch = raw.get("now")
+
+    lines = [f"Помпы: активна pump{active + 1}"]
+    for idx in (active, 1 - active):
+        role = "" if idx == active else " (резерв)"
+        run_at = at[idx] if isinstance(at, list) and len(at) > idx else None
+        if not isinstance(run_at, int) or run_at == 0:
+            lines.append(f"  pump{idx + 1}{role}: не запускалась")
+            continue
+        volume = ml[idx] if isinstance(ml, list) and len(ml) > idx else None
+        volume_text = f"{volume}мл" if isinstance(volume, int) else "объём неизвестен"
+        if isinstance(now_epoch, int) and now_epoch > 0:
+            lines.append(f"  pump{idx + 1}{role}: {volume_text}, {_ago(now_epoch - run_at)}")
+        else:
+            lines.append(f"  pump{idx + 1}{role}: {volume_text}, когда — неизвестно")
+    return lines
+
+
 def _render_state(raw: dict, age: timedelta | None) -> str:
     """Человекочитаемый рендер UART-стейта (src/State.h::serializeState). Сырые ключи
     (t, h, ram, p[].{id,on,or,m}) читаются с .get() — частично битый/неполный JSON
@@ -482,6 +560,8 @@ def _render_state(raw: dict, age: timedelta | None) -> str:
     ram = raw.get("ram")
     if ram is not None:
         lines.append(f"RAM: {ram}")
+
+    lines += _render_pumps(raw)
 
     plants = raw.get("p")
     if isinstance(plants, list) and plants:

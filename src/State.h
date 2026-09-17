@@ -9,6 +9,11 @@
 #define PLANT_IS_OFF_EXCEPTION 2
 #define PLANT_IS_UNDEFINED -1
 #define PLANTS_AMOUNT 16
+// Помпы: позиционные номера, наружу (Telegram, aw/state) — pump1/pump2.
+// Индекс в массивах стейта, не пин: пины живут в Pomp.h.
+#define PUMPS_AMOUNT 2
+#define PUMP_1 0
+#define PUMP_2 1
 // todo удалить: не используется, дубль COMMUNICATION_DATA_CHUNK_SIZE
 #define DATA_CHUNK_SIZE 62  // SERIAL_TX_BUFFER_SIZE
 #define UNDEFINED_PLANT_VALUE 1022
@@ -22,11 +27,12 @@
 #define ESP_COMMAND_CONFIG_PLANT F("esp_plant_conf")
 #define ESP_COMMAND_DAILY_TASK F("esp_daily")
 #define ESP_COMMAND_CHECK_VALVES F("esp_check_valves")
+#define ESP_COMMAND_SWITCH_PUMP F("esp_pump")
 
 #define ARDUINO_COMMAND_STATE F("state")
 #define ARDUINO_SEND_TELEGRAM F("arduino_tg")
 
-#define EEPROM_VERSION 6
+#define EEPROM_VERSION 7
 
 // Изменил, обнови EEPROM_VERSION
 struct Plant {
@@ -48,6 +54,19 @@ struct State {
 
   bool sdInited = false;
   bool pompIsOn = false;
+
+  // Активная помпа: PUMP_1 (D6) или PUMP_2 (D5). Переживает ребут, иначе
+  // после каждого ресета система возвращалась бы на помпу, которую только
+  // что признали дохлой. Дефолт PUMP_2 — поведение прошивки до issue #22.
+  uint8_t activePump = PUMP_2;
+  // Результат последнего пуска каждой помпы: сколько мл намерил расходомер
+  // и когда это было (dateToEpoch, 0 — ни разу не запускалась). Вердикт
+  // «резервная жива» ручной, по этим двум числам в /state (issue #22).
+  uint16_t lastPumpMl[PUMPS_AMOUNT] = {0, 0};
+  uint32_t lastPumpRunAt[PUMPS_AMOUNT] = {0, 0};
+  // Снимок часов Mega на момент сборки Стейта: по нему aw-server считает
+  // возраст пусков помп, не пытаясь свести свои часы с RTC ардуины.
+  uint32_t nowEpoch = 0;
   bool espConnectedAndTimeSynced = false;
   bool temperatureSensorInited = false;
   // bool hasWaterLevel = false;
@@ -103,6 +122,30 @@ inline String dateToString(Ds1302::DateTime now) {
   return out;
 }
 
+// Время RTC в линейные секунды (эпоха avr-libc — с 2000-01-01) для
+// арифметики возраста: сравнивать Ds1302::DateTime поэлементно ради
+// «сколько минут назад» неудобно. 0 считаем за «события не было» —
+// коллизия только с полуночью 2000-01-01, то есть с неинициализированным
+// RTC, где значение и так бессмысленно.
+// Считаем сами, а не через libc: mk_gmtime есть только в avr-libc (ESP не
+// собирается), а mktime/timegm на ESP отсчитывают от 1970 против 2000 у
+// AVR — один и тот же кадр получал бы разные числа на разных прошивках.
+inline uint32_t dateToEpoch(Ds1302::DateTime dt) {
+  // дней с начала года до начала месяца, невисокосный год
+  static const uint16_t daysBeforeMonth[12] = {0,   31,  59,  90,  120, 151,
+                                               181, 212, 243, 273, 304, 334};
+  if (dt.month < 1 || dt.month > 12) return 0;
+  uint16_t year = dt.year;  // 00-99 от 2000
+  // 2000 — високосный, и в диапазоне 2000-2099 правило «каждые 4 года»
+  // работает без исключений (2100 уже вне разрядности Ds1302)
+  uint32_t days = (uint32_t)year * 365 + (year + 3) / 4;
+  days += daysBeforeMonth[dt.month - 1];
+  if (dt.month > 2 && (year % 4) == 0) days++;
+  days += dt.day - 1;
+  return days * 86400UL + (uint32_t)dt.hour * 3600UL +
+         (uint32_t)dt.minute * 60UL + dt.second;
+}
+
 inline bool isDefined(const Plant& plant) {
   // todo <<<<<< когда будут ошибки учесть их
   return plant.isOn == PLANT_IS_ON;
@@ -117,6 +160,16 @@ inline JsonDocument serializeState(const State& state) {
   out[F("t")] = temp;
   out[F("h")] = hum;
   out[F("ram")] = state.freeMemorySize;
+
+  // Помпы (issue #22): активная + последний результат каждой. Время — в
+  // часах Mega: возраст aw-server считает как now - pat[i], в одной шкале,
+  // не сводя свои часы с RTC ардуины.
+  out[F("pmp")] = state.activePump;
+  out[F("now")] = state.nowEpoch;
+  for (int i = 0; i < PUMPS_AMOUNT; i++) {
+    out[F("pml")][i] = state.lastPumpMl[i];
+    out[F("pat")][i] = state.lastPumpRunAt[i];
+  }
 
   int id = 0;
   for (int i = 0; i < PLANTS_AMOUNT; i++) {
@@ -141,6 +194,13 @@ inline State deserializeState(const JsonDocument& doc) {
   out.temperature = (float)temp / 10;
   out.humidity = (float)hum / 10;
   out.freeMemorySize = doc[F("ram")];
+
+  out.activePump = doc[F("pmp")] | PUMP_2;
+  out.nowEpoch = doc[F("now")] | 0UL;
+  for (int i = 0; i < PUMPS_AMOUNT; i++) {
+    out.lastPumpMl[i] = doc[F("pml")][i] | 0;
+    out.lastPumpRunAt[i] = doc[F("pat")][i] | 0UL;
+  }
 
   for (size_t i = 0; i < doc[F("p")].size(); i++) {
     // акууратенее с id и i

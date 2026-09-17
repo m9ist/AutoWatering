@@ -485,3 +485,104 @@ def test_online_first_value_does_not_broadcast():
     effects = router.handle_online_message(b"1", received_at_ns=1)
 
     assert not any(isinstance(e, TelegramBroadcast) for e in effects)
+
+
+# --- issue #22: выбор помпы ---
+
+# Кадр с помпами: активна pump2 (индекс 1), pump2 качала 47мл 40 минут назад,
+# pump1 (резерв) дала 0мл трое суток назад. Время — в часах Mega (поле now).
+_NOW_EPOCH = 842_963_696
+_PUMP_STATE = (
+    b'{"t": 234, "h": 450, "ram": 4200, "pmp": 1, "now": 842963696, '
+    b'"pml": [0, 47], "pat": [842704496, 842961296], '
+    b'"p": [{"id": 2, "on": 10, "or": 512, "m": 50}]}'
+)
+
+
+def test_pump_command_publishes_switch_cmd():
+    router = _router()
+    now = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    result = router.handle_pump(ALLOWED_CHAT, now)
+
+    assert result.cmd_payload == {"c": "esp_pump", "timestamp": "2026-07-20 12:00:00"}
+    assert result.reply_text == "Команда отправлена."
+
+
+def test_pump_command_from_foreign_chat_is_ignored():
+    router = _router()
+
+    result = router.handle_pump(FOREIGN_CHAT, datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc))
+
+    assert result == CommandResult(reply_text=None, cmd_payload=None, ignored=True)
+
+
+def test_state_shows_active_pump_and_last_runs():
+    router = _router()
+    received_at = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    router.handle_state_message(_PUMP_STATE, received_at)
+    text = router.handle_state(ALLOWED_CHAT, received_at + timedelta(minutes=5)).reply_text
+
+    assert "Помпы: активна pump2" in text
+    # активная идёт первой, резерв — второй и помечен ролью
+    assert "  pump2: 47мл, 40 мин назад" in text
+    assert "  pump1 (резерв): 0мл, 3 дня назад" in text
+
+
+def test_hourly_summary_shows_pumps():
+    # /state и часовая сводка делят один рендер — помпы должны быть в обоих
+    router = _router()
+    received_at = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    router.handle_state_message(_PUMP_STATE, received_at)
+    text = router.hourly_summary_text(received_at + timedelta(minutes=5))
+
+    assert "Помпы: активна pump2" in text
+
+
+def test_pump_never_run_is_reported_as_such():
+    # pat=0 — помпа ни разу не запускалась; «0мл, 0 мин назад» тут соврало бы
+    router = _router()
+    received_at = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+    payload = b'{"pmp": 1, "now": 842963696, "pml": [0, 47], "pat": [0, 842961296]}'
+
+    router.handle_state_message(payload, received_at)
+    text = router.handle_state(ALLOWED_CHAT, received_at).reply_text
+
+    assert "pump1 (резерв): не запускалась" in text
+
+
+def test_state_without_pump_fields_renders_without_pump_block():
+    # кадр старой прошивки (до issue #22) не должен ронять /state
+    router = _router()
+    received_at = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    router.handle_state_message(b'{"t": 234, "h": 450, "ram": 4200}', received_at)
+    text = router.handle_state(ALLOWED_CHAT, received_at).reply_text
+
+    assert "Помпы" not in text
+    assert "23.4" in text
+
+
+def test_help_mentions_pump_command():
+    router = _router()
+
+    assert "/pump" in router.handle_help(ALLOWED_CHAT).reply_text
+
+
+def test_hostile_pump_index_does_not_break_state():
+    # "pmp": 1.0 проходил проверку на вхождение (1.0 == 1) и падал индексом
+    # списка; кадр retained, поэтому один такой вешал /state до следующего
+    # живого стейта (ревью GLM)
+    router = _router()
+    received_at = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    router.handle_state_message(
+        b'{"t": 234, "pmp": 1.0, "now": 842963696, "pml": [0, 47], "pat": [0, 842961296]}',
+        received_at,
+    )
+    text = router.handle_state(ALLOWED_CHAT, received_at).reply_text
+
+    assert "Помпы" not in text
+    assert "23.4" in text

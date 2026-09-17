@@ -47,6 +47,10 @@ void loadStateEEPROM() {
     Serial.println("Bad version of EEPROM in memory");
   } else {
     EEPROM.get(address, global_state);
+    // activePump идёт индексом в lastPumpMl/lastPumpRunAt: перевёрнутый бит в
+    // этом байте (версия и размер при этом целы) дал бы запись мимо массива,
+    // в соседние поля State, и она осталась бы в EEPROM (ревью GLM)
+    if (global_state.activePump > PUMP_2) global_state.activePump = PUMP_2;
     Serial.println("Loaded state from eeprom");
   }
 }
@@ -130,7 +134,12 @@ void sendTelegram(String message) {
 }
 
 void waterPlant(int id, int amount) {
-  String info = pomp.waterPlant(id, amount, logger);
+  String info =
+      pomp.waterPlant(id, amount, global_state, dateToEpoch(awClock.getNow()),
+                      logger);
+  // результат пуска помпы лёг в стейт (issue #22) — сохраняем и отдаём наверх
+  saveStateEEPROM();
+  stateUpdated();
   logFreeRam();
   sendTelegram(info);
   delay(10);
@@ -224,6 +233,18 @@ void processEspCommand(JsonDocument& doc) {
     return;
   }
 
+  if ((String)ESP_COMMAND_SWITCH_PUMP == command) {
+    // Переключение на другую помпу (issue #22). Эха в Telegram нет —
+    // поднимаем updated, результат человек смотрит через /state.
+    global_state.activePump =
+        global_state.activePump == PUMP_1 ? PUMP_2 : PUMP_1;
+    saveStateEEPROM();
+    stateUpdated();
+    logger.writeln((String)F("Active pump switched to ") +
+                   (global_state.activePump + 1));
+    return;
+  }
+
 #ifdef DEBUG_LOG
   logger.writeln((String)F("Unknown command ") + command);
 #endif
@@ -253,6 +274,9 @@ void loop() {
 
   if (global_state.updated) {
     logFreeRam();
+    // часы Mega в кадр: по ним aw-server считает возраст пусков помп, не
+    // сводя своё время с RTC ардуины (issue #22)
+    global_state.nowEpoch = dateToEpoch(awClock.getNow());
     JsonDocument toSend = serializeState(global_state);
     String out;
 #ifdef DEBUG_LOG
@@ -274,9 +298,13 @@ void loop() {
   for (int i = 0; i < 16; i++) {
     if (pomp.isWaterNowButtonPressed(i)) {
       drawScreenMessage((String)F("Start water plant ") + i, logger);
+      // Кнопка на корпусе — всегда активная помпа, без пробы резерва: ты
+      // стоишь рядом с горшком и ждёшь воды, получить в этот момент пуск
+      // дохлого резерва — худший вариант (issue #22).
+      uint8_t pumpIdx = global_state.activePump;
       pomp.beginWateringAmpStats(logger);
       pomp.beforeLoopFlowSensor();
-      pomp.startWaterPlant(i, logger);
+      pomp.startWaterPlant(i, pumpIdx, logger);
 
       while (pomp.isWaterNowButtonPressed(i)) {
         wdt_reset();
@@ -285,9 +313,14 @@ void loop() {
       }
 
       unsigned long actualMs = pomp.stopWaterPlant(i, logger);
-      String info = pomp.buildWaterReport(
-          i, /*requestedMl=*/-1, actualMs, pomp.getWaterFlowSensorMl(),
-          pomp.getWateringAmpDelta());
+      float realMl = pomp.getWaterFlowSensorMl();
+      String info = pomp.buildWaterReport(i, pumpIdx, /*spareProbe=*/false,
+                                          /*requestedMl=*/-1, actualMs, realMl,
+                                          pomp.getWateringAmpDelta());
+      pomp.recordPumpRun(global_state, pumpIdx, realMl,
+                         dateToEpoch(awClock.getNow()));
+      saveStateEEPROM();
+      stateUpdated();
       drawScreenMessage(info, logger);
       sendTelegram(info);
       // todo <<<<<< подумать как отказаться от этого, обдумать всю схему работы

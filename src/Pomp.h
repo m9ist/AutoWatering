@@ -24,6 +24,10 @@
 #define POMP_SPEED_MEDIUM 140
 #define POMP_SPEED_HIGH 180
 
+// Проба резерва (issue #22): доля поливов, которые уходят на неактивную
+// помпу — чтобы знать, жива ли она, до того как умрёт активная.
+#define SPARE_PROBE_PERCENT 10
+
 #define WATER_FLOW_ITERATION_MS 100
 
 // Оркестратор полива: насос, кнопки/тумблеры через мультиплексеры и
@@ -38,15 +42,30 @@ class Pomp {
 
   int currentPomp;
   bool acsPrimed = false;
+  bool randomSeeded = false;
 
   Valves valves;
   FlowMeter flowMeter;
   CurrentSensor currentSensor;
 
-  void startPomp(AwLogging& logger) {
-    logger.writeln(F("Start pomp"));
-    // todo запрогать схему со сменой моторов
-    currentPomp = PIN_POMP_SPARE;
+  // Сид для пробы резерва берём при первом поливе, а не в setup(): весь код
+  // до setup() выполняется одинаково от ребута к ребуту, и сид там был бы
+  // детерминированным. Момент первого полива — настоящая асинхронная
+  // энтропия: планировщика в прошивке нет, полив всегда инициирует человек
+  // или сервер. analogRead ACS712 подмешивает шум реального аналогового
+  // входа (свободные A3-A7 на разведённой плате болтались бы в воздухе и
+  // дали бы меньше).
+  void seedRandomIfNeeded(AwLogging& logger) {
+    if (randomSeeded) return;
+    unsigned long seed = micros() ^ (unsigned long)analogRead(PIN_AMPERAGE_SENSOR);
+    randomSeed(seed);
+    randomSeeded = true;
+    logger.writeln((String)F("Random seeded: ") + seed);
+  }
+
+  void startPomp(uint8_t pumpIdx, AwLogging& logger) {
+    logger.writeln((String)F("Start pomp ") + (pumpIdx + 1));
+    currentPomp = pumpPin(pumpIdx);
     analogWrite(currentPomp, POMP_SPEED_LOW);
     delay(30);
     analogWrite(currentPomp, POMP_SPEED_MEDIUM);
@@ -59,6 +78,13 @@ class Pomp {
     analogWrite(currentPomp, POMP_SPEED_LOW);
     delay(50);
     digitalWrite(currentPomp, LOW);
+  }
+
+  // Позиционный номер помпы -> пин. Наружу (Telegram, aw/state) помпы
+  // известны как pump1/pump2 и нумеруются позиционно; пины не покидают
+  // этот модуль.
+  int pumpPin(uint8_t pumpIdx) {
+    return pumpIdx == PUMP_1 ? PIN_POMP_MAIN : PIN_POMP_SPARE;
   }
 
   void multiplexPlant(int id) {
@@ -149,13 +175,37 @@ class Pomp {
     return v == LOW;
   }
 
-  void startWaterPlant(int id, AwLogging& logger) {
+  void startWaterPlant(int id, uint8_t pumpIdx, AwLogging& logger) {
     logger.writeln((String)F("Watering plant ") + id);
     timeCheck = millis();
     valves.turnOn(id, logger);
     // сделано, чтобы не создавать напряжение на клапанах
     delay(200);
-    startPomp(logger);
+    startPomp(pumpIdx, logger);
+  }
+
+  // Какой помпой поливать. С вероятностью SPARE_PROBE_PERCENT — неактивной:
+  // это и есть проба резерва. Бросок на каждое растение, а не один на весь
+  // дневной полив: при мёртвом резерве потерять один горшок из шестнадцати
+  // лучше, чем все шестнадцать (issue #22).
+  uint8_t pickPumpForWatering(const State& state, AwLogging& logger) {
+    seedRandomIfNeeded(logger);
+    if (random(100) < SPARE_PROBE_PERCENT) {
+      uint8_t spare = state.activePump == PUMP_1 ? PUMP_2 : PUMP_1;
+      logger.writeln((String)F("Spare probe: pump ") + (spare + 1));
+      return spare;
+    }
+    return state.activePump;
+  }
+
+  // Результат пуска помпы в Стейт — по этим числам человек решает, жива ли
+  // резервная (автоматического вердикта нет: ACS712 сидит на 5В-линии
+  // клапанов, а помпа на отдельном 12В, ток про мотор ничего не говорит —
+  // см. ADR-0002). Время приходит снаружи: у Pomp нет доступа к RTC.
+  void recordPumpRun(State& state, uint8_t pumpIdx, float realMl,
+                     uint32_t nowEpoch) {
+    state.lastPumpMl[pumpIdx] = (uint16_t)realMl;
+    state.lastPumpRunAt[pumpIdx] = nowEpoch;
   }
 
   // Возвращает реальную длительность полива в мс. Сводка собирается
@@ -191,29 +241,37 @@ class Pomp {
   // Собирает унифицированную строку отчёта о поливе.
   // requestedMl < 0 — manual полив без заданного объёма.
   // ampDelta — средний ток поверх baseline (см. getWateringAmpDelta).
+  // spareProbe — полив ушёл на неактивную помпу (проба резерва): без этой
+  // пометки «Pump 1, Real ml = 0» не отличить от «переключился командой и
+  // теперь всё льётся в пустоту».
   // snprintf в статический буфер вместо конкатенации String — меньше
   // реаллокаций кучи (фрагментация на 8КБ RAM).
-  String buildWaterReport(int id, int requestedMl, unsigned long actualMs,
-                          float realMl, int ampDelta) {
+  String buildWaterReport(int id, uint8_t pumpIdx, bool spareProbe,
+                          int requestedMl, unsigned long actualMs, float realMl,
+                          int ampDelta) {
     const char* valveStatus =
         ampDelta > CurrentSensor::VALVE_DELTA_THRESHOLD_MA ? "OK"
                                                            : "DISCONNECTED";
-    char buf[140];
+    const char* probeMark = spareProbe ? " (spare probe)" : "";
+    char buf[160];
     if (requestedMl >= 0) {
       snprintf_P(buf, sizeof(buf),
-                 PSTR("Done water id %d with %dml. Amperage delta: %dmA (%s). "
-                      "Duration %lums. Real ml = %d"),
-                 id, requestedMl, ampDelta, valveStatus, actualMs, (int)realMl);
+                 PSTR("Done water id %d with %dml. Pump %d%s. Amperage delta: "
+                      "%dmA (%s). Duration %lums. Real ml = %d"),
+                 id, requestedMl, pumpIdx + 1, probeMark, ampDelta, valveStatus,
+                 actualMs, (int)realMl);
     } else {
       snprintf_P(buf, sizeof(buf),
-                 PSTR("Done water id %d. Amperage delta: %dmA (%s). "
+                 PSTR("Done water id %d. Pump %d%s. Amperage delta: %dmA (%s). "
                       "Duration %lums. Real ml = %d"),
-                 id, ampDelta, valveStatus, actualMs, (int)realMl);
+                 id, pumpIdx + 1, probeMark, ampDelta, valveStatus, actualMs,
+                 (int)realMl);
     }
     return String(buf);
   }
 
-  String waterPlant(int id, int amounMl, AwLogging& logger) {
+  String waterPlant(int id, int amounMl, State& state, uint32_t nowEpoch,
+                    AwLogging& logger) {
     wdt_reset();
     float practicalSpeedMlInMs = 0.0077;
     // сколько итераций по 0.1 сек нужно сделать
@@ -221,10 +279,13 @@ class Pomp {
         (float)amounMl / practicalSpeedMlInMs / WATER_FLOW_ITERATION_MS;
     logger.writeln((String)F("Num iterations = ") + expectedNumIterations);
 
+    uint8_t pumpIdx = pickPumpForWatering(state, logger);
+    bool spareProbe = pumpIdx != state.activePump;
+
     beginWateringAmpStats(logger);
     beforeLoopFlowSensor();
     unsigned long start = millis();
-    startWaterPlant(id, logger);
+    startWaterPlant(id, pumpIdx, logger);
 
     for (int iter = 0; iter < expectedNumIterations; iter++) {
       while (start + WATER_FLOW_ITERATION_MS > millis() && start <= millis()) {
@@ -236,7 +297,9 @@ class Pomp {
     }
 
     unsigned long actualMs = stopWaterPlant(id, logger);
-    return buildWaterReport(id, amounMl, actualMs, getWaterFlowSensorMl(),
+    float realMl = getWaterFlowSensorMl();
+    recordPumpRun(state, pumpIdx, realMl, nowEpoch);
+    return buildWaterReport(id, pumpIdx, spareProbe, amounMl, actualMs, realMl,
                             getWateringAmpDelta());
   }
 

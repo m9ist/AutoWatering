@@ -64,6 +64,11 @@ void test_check_valves_command_recognized() {
   TEST_ASSERT_EQUAL(static_cast<int>(Action::kCheckValves), static_cast<int>(d.action));
 }
 
+void test_switch_pump_command_recognized() {
+  Decision d = decide("{\"c\":\"esp_pump\"}");
+  TEST_ASSERT_EQUAL(static_cast<int>(Action::kSwitchPump), static_cast<int>(d.action));
+}
+
 // --- esp_graphs больше не существует (issue #20) — отвергается ---
 
 void test_graphs_command_is_rejected() {
@@ -143,6 +148,7 @@ int main() {
 
   RUN_TEST(test_daily_command_recognized);
   RUN_TEST(test_check_valves_command_recognized);
+  RUN_TEST(test_switch_pump_command_recognized);
   RUN_TEST(test_graphs_command_is_rejected);
 
   RUN_TEST(test_bounds_accepts_edge_values);

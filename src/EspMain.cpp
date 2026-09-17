@@ -237,6 +237,9 @@ void handleCmdMessage(const uint8_t* payload, unsigned int length) {
     case cmdhandler::Action::kCheckValves:
       serialLog(ESP_COMMAND_CHECK_VALVES, F("From aw/cmd"));
       return;
+    case cmdhandler::Action::kSwitchPump:
+      serialLog(ESP_COMMAND_SWITCH_PUMP, F("From aw/cmd"));
+      return;
     case cmdhandler::Action::kReject:
     default:
       serialLog(d.reason);
