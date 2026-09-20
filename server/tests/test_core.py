@@ -517,6 +517,110 @@ def test_pump_command_from_foreign_chat_is_ignored():
     assert result == CommandResult(reply_text=None, cmd_payload=None, ignored=True)
 
 
+def test_wakeup_without_args_uses_default_formula():
+    router = _router()
+    now = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    result = router.handle_wakeup(ALLOWED_CHAT, ["plant3"], now)
+
+    assert result.cmd_payload == {
+        "c": "esp_wakeup",
+        "timestamp": "2026-07-20 12:00:00",
+        "plantId": 3,
+        "longCycles": 3,
+        "longOnMs": 2000,
+        "shortCycles": 7,
+        "shortOnMs": 300,
+    }
+    assert result.reply_text is not None
+
+
+def test_wakeup_with_explicit_formula_overrides_defaults():
+    router = _router()
+    now = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    result = router.handle_wakeup(ALLOWED_CHAT, ["plant0", "5x1500", "10x400"], now)
+
+    assert result.cmd_payload["plantId"] == 0
+    assert result.cmd_payload["longCycles"] == 5
+    assert result.cmd_payload["longOnMs"] == 1500
+    assert result.cmd_payload["shortCycles"] == 10
+    assert result.cmd_payload["shortOnMs"] == 400
+
+
+def test_wakeup_accepts_ms_suffix_in_formula():
+    router = _router()
+    now = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    result = router.handle_wakeup(ALLOWED_CHAT, ["plant1", "2x1000ms", "4x250ms"], now)
+
+    assert result.cmd_payload["longOnMs"] == 1000
+    assert result.cmd_payload["shortOnMs"] == 250
+
+
+def test_wakeup_half_formula_is_rejected():
+    """Либо обе фазы, либо ни одной: половинчатый разбор оставлял бы человека
+    гадать, какая фаза осталась дефолтной."""
+    router = _router()
+    now = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    result = router.handle_wakeup(ALLOWED_CHAT, ["plant1", "3x2000"], now)
+
+    assert result.cmd_payload is None
+    assert result.reply_text is not None
+
+
+def test_wakeup_malformed_args_are_rejected_without_publishing():
+    router = _router()
+    now = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    for bad_args in ([], ["plantX"], ["plant1", "3x", "7x300"], ["plant1", "x2000", "7x300"],
+                     ["plant1", "3-2000", "7x300"], ["plant1", "3x2000", "7x300", "9x100"]):
+        result = router.handle_wakeup(ALLOWED_CHAT, bad_args, now)
+        assert result.cmd_payload is None, bad_args
+        assert result.reply_text is not None, bad_args
+
+
+def test_wakeup_out_of_bounds_is_rejected_without_publishing():
+    router = _router()
+    now = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    for bad_args in (["plant99"], ["plant1", "31x2000", "7x300"],
+                     ["plant1", "3x5001", "7x300"], ["plant1", "3x2000", "7x9000"]):
+        result = router.handle_wakeup(ALLOWED_CHAT, bad_args, now)
+        assert result.cmd_payload is None, bad_args
+        assert result.reply_text is not None, bad_args
+
+
+def test_wakeup_works_for_any_plant_id_in_range():
+    """Оживляем клапан независимо от того, включено растение тумблером или нет:
+    дольше всех простаивает как раз выключенный горшок."""
+    router = _router()
+    now = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+
+    for plant_id in (0, 15):
+        result = router.handle_wakeup(ALLOWED_CHAT, [f"plant{plant_id}"], now)
+        assert result.cmd_payload["plantId"] == plant_id
+
+
+def test_wakeup_from_foreign_chat_is_ignored():
+    router = _router()
+
+    result = router.handle_wakeup(
+        FOREIGN_CHAT, ["plant3"], datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
+    )
+
+    assert result == CommandResult(reply_text=None, cmd_payload=None, ignored=True)
+
+
+def test_help_mentions_wakeup_command():
+    router = _router()
+
+    result = router.handle_help(ALLOWED_CHAT)
+
+    assert "/wakeup" in result.reply_text
+
+
 def test_state_shows_active_pump_and_last_runs():
     router = _router()
     received_at = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)

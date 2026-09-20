@@ -177,6 +177,49 @@ bool isValidPlantCommand(long id, long amount) {
   return true;
 }
 
+// Границы параметров оживления. Прогон по времени не ограничен (кнопка крутит
+// формулу, пока её держат) — это отсев опечаток на входе, как у amountMl:
+// "3x20000" означал бы клапан под напряжением 20 секунд подряд.
+bool isValidWakeupCommand(long id, long longCycles, long longOnMs,
+                          long shortCycles, long shortOnMs) {
+  if (id < 0 || id >= PLANTS_AMOUNT) {
+    sendTelegram((String)F("Rejected: bad plant id ") + id);
+    return false;
+  }
+  if (longCycles < 0 || longCycles > MAX_WAKEUP_CYCLES || shortCycles < 0 ||
+      shortCycles > MAX_WAKEUP_CYCLES || longOnMs < 0 ||
+      longOnMs > MAX_WAKEUP_ON_MS || shortOnMs < 0 ||
+      shortOnMs > MAX_WAKEUP_ON_MS) {
+    sendTelegram((String)F("Rejected: bad wakeup params, max ") +
+                 MAX_WAKEUP_CYCLES + F(" cycles, ") + MAX_WAKEUP_ON_MS +
+                 F("ms on"));
+    return false;
+  }
+  return true;
+}
+
+// Оживление клапана с кнопки: тумблер мотора выключен, значит человек просит
+// не полив, а расхаживание клапана. Формула крутится по кругу, пока кнопку
+// держат; один полный проход отрабатывает в любом случае, даже если кнопку
+// отпустили сразу. Помпа не запускается — режим всегда сухой.
+// Стейт и EEPROM не трогаем: оживление не оставляет следа, только отчёт.
+void wakeupPlantByButton(int id) {
+  drawScreenMessage((String)F("Wakeup plant ") + id, logger);
+  Pomp::WakeupRun run = pomp.beginWakeup(logger);
+  do {
+    pomp.runWakeupFormula(id, WAKEUP_LONG_CYCLES, WAKEUP_LONG_ON_MS,
+                          WAKEUP_SHORT_CYCLES, WAKEUP_SHORT_ON_MS, run, logger);
+  } while (pomp.isWaterNowButtonPressed(id));
+  String info = pomp.buildWakeupReport(id, run);
+  // Отчёт остаётся на экране: loopScreen() здесь затёр бы его за десятки
+  // миллисекунд, а паузу на чтение сознательно не ставим — после прогона
+  // можно сразу браться за соседний горшок. Экран вернётся к обычному виду
+  // на ближайшей проверке датчиков.
+  drawScreenMessage(info, logger);
+  sendTelegram(info);
+  logFreeRam();
+}
+
 void processEspCommand(JsonDocument& doc) {
   const char* command = doc[COMMAND_KEY];
   if ((String)ESP_COMMAND_LOG == command) {
@@ -230,6 +273,30 @@ void processEspCommand(JsonDocument& doc) {
 
   if ((String)ESP_COMMAND_CHECK_VALVES == command) {
     sendTelegram(pomp.checkAllActiveValves(global_state, logger));
+    return;
+  }
+
+  if ((String)ESP_COMMAND_WAKEUP == command) {
+    long id = doc[F("plantId")];
+    long longCycles = doc[F("longCycles")];
+    long longOnMs = doc[F("longOnMs")];
+    long shortCycles = doc[F("shortCycles")];
+    long shortOnMs = doc[F("shortOnMs")];
+    if (!isValidWakeupCommand(id, longCycles, longOnMs, shortCycles,
+                              shortOnMs)) {
+      return;
+    }
+    // Статус растения не смотрим (в отличие от checkAllActiveValves): команда
+    // адресная, а дольше всех простаивает как раз клапан выключенного горшка.
+    logger.buzzerCommand();
+    drawScreenMessage((String)F("Wakeup plant ") + id, logger);
+    Pomp::WakeupRun run = pomp.beginWakeup(logger);
+    pomp.runWakeupFormula(id, longCycles, longOnMs, shortCycles, shortOnMs, run,
+                          logger);
+    String info = pomp.buildWakeupReport(id, run);
+    // Экран не перерисовываем — см. wakeupPlantByButton
+    drawScreenMessage(info, logger);
+    sendTelegram(info);
     return;
   }
 
@@ -297,6 +364,13 @@ void loop() {
 
   for (int i = 0; i < 16; i++) {
     if (pomp.isWaterNowButtonPressed(i)) {
+      // Тумблер мотора читаем один раз, в момент нажатия: выключен — кнопка
+      // оживляет клапан, включен — поливает как раньше. Щелчок тумблером
+      // посреди прогона режим не меняет.
+      if (!pomp.isPompSwitchOn()) {
+        wakeupPlantByButton(i);
+        return;
+      }
       drawScreenMessage((String)F("Start water plant ") + i, logger);
       // Кнопка на корпусе — всегда активная помпа, без пробы резерва: ты
       // стоишь рядом с горшком и ждёшь воды, получить в этот момент пуск

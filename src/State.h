@@ -20,6 +20,20 @@
 // максимальный объём одной команды полива (и дневной нормы), защита от опечаток
 #define MAX_WATER_AMOUNT_ML 200
 
+// Оживление клапана (wakeup): формула прогона — сначала длинные «дожимы»
+// (клапан после простоя не открывается, но открывается, если подержать
+// напряжение), потом короткие щелчки, расхаживающие ход.
+#define WAKEUP_LONG_CYCLES 3
+#define WAKEUP_LONG_ON_MS 2000
+#define WAKEUP_SHORT_CYCLES 7
+#define WAKEUP_SHORT_ON_MS 300
+// Пауза между циклами одна на обе фазы, в параметры команды не выносится.
+#define WAKEUP_OFF_MS 300
+// Границы параметров команды — отсев опечаток, как MAX_WATER_AMOUNT_ML.
+// Это не предел длительности прогона: кнопка крутит формулу, пока её держат.
+#define MAX_WAKEUP_CYCLES 30
+#define MAX_WAKEUP_ON_MS 5000
+
 #define COMMAND_KEY F("c")
 #define ESP_COMMAND_LOG F("esp_log")
 #define ESP_COMMAND_TIME_SYNCED F("esp_ntp")
@@ -28,6 +42,7 @@
 #define ESP_COMMAND_DAILY_TASK F("esp_daily")
 #define ESP_COMMAND_CHECK_VALVES F("esp_check_valves")
 #define ESP_COMMAND_SWITCH_PUMP F("esp_pump")
+#define ESP_COMMAND_WAKEUP F("esp_wakeup")
 
 #define ARDUINO_COMMAND_STATE F("state")
 #define ARDUINO_SEND_TELEGRAM F("arduino_tg")

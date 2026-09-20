@@ -34,6 +34,18 @@
 // сценарии полива. Клапаны, расходомер и датчик тока — отдельные
 // модули (Valves, FlowMeter, CurrentSensor), Pomp их координирует.
 class Pomp {
+ public:
+  // Накопитель одного прогона оживления: кнопка крутит формулу по кругу,
+  // пока её держат, поэтому счётчик циклов и дельты живут снаружи проходов.
+  struct WakeupRun {
+    // unsigned: кнопка не ограничена по времени, залипшая дала бы на int
+    // знаковое переполнение (UB) примерно через 10 часов удержания
+    unsigned int cycles = 0;
+    int baseline = 0;
+    int firstDelta = 0;
+    int lastDelta = 0;
+  };
+
  private:
   bool pompState = false;
   int plantsToButton[PLANTS_AMOUNT] = {1, 3, 5, 7, 8, 10, 12, 14,
@@ -108,6 +120,28 @@ class Pomp {
     valves.turnOff(PRIMER_SLOT, logger);
     delay(PRIMER_SETTLE_MS);
     acsPrimed = true;
+  }
+
+  // Один цикл оживления: открыть клапан на onMs, закрыть на WAKEUP_OFF_MS.
+  // Ток снимается в том же окне, что и в checkValveConnected: сначала
+  // ON_DELAY_MS, потом 5 замеров. Соленоиду нужно ~30мс на выход на ток
+  // (tasks/2026-05-24: on[0] ниже on[1] на 100-250mA), а порог всего 50mA —
+  // замер с t=0 затянул бы среднее вниз и дал бы ложный DISCONNECTED.
+  void wakeupCycle(int id, int onMs, WakeupRun& run, AwLogging& logger) {
+    const int ON_DELAY_MS = 50;
+    const int ACTIVE_SAMPLES = 5;
+    const int MEASURE_MS = ON_DELAY_MS + ACTIVE_SAMPLES * 10;
+    valves.turnOn(id, logger);
+    delay(ON_DELAY_MS);
+    int delta = currentSensor.measureDcAvg(ACTIVE_SAMPLES) - run.baseline;
+    if (onMs > MEASURE_MS) delay(onMs - MEASURE_MS);
+    valves.turnOff(id, logger);
+    wdt_reset();
+    delay(WAKEUP_OFF_MS);
+    wdt_reset();
+    if (run.cycles == 0) run.firstDelta = delta;
+    run.lastDelta = delta;
+    run.cycles++;
   }
 
  public:
@@ -301,6 +335,53 @@ class Pomp {
     recordPumpRun(state, pumpIdx, realMl, nowEpoch);
     return buildWaterReport(id, pumpIdx, spareProbe, amounMl, actualMs, realMl,
                             getWateringAmpDelta());
+  }
+
+  // Положение тумблера мотора прямо сейчас. Читается в момент нажатия
+  // кнопки проливки: тумблер OFF -> кнопка запускает оживление клапана, а не
+  // полив. Через state.pompIsOn не ходим — он обновляется отдельной веткой
+  // loop() и на момент нажатия может отставать на итерацию.
+  bool isPompSwitchOn() { return digitalRead(PIN_POMP_TURN_ON) != HIGH; }
+
+  // Прогрев линии и baseline при закрытом клапане — тот же порядок, что у
+  // checkValveConnected: без primer первый замер ловит «фоновый +18А».
+  WakeupRun beginWakeup(AwLogging& logger) {
+    primeAcsLineIfNeeded(logger);
+    WakeupRun run;
+    run.baseline = currentSensor.measureDcAvg(10);
+    logger.writeln((String)F("Wakeup baseline: ") + run.baseline + F("mA"));
+    return run;
+  }
+
+  // Один проход формулы оживления: longCycles «дожимов» по longOnMs (клапан
+  // после простоя не открывается сразу, но открывается, если подержать
+  // напряжение — этим лечим прикипание), затем shortCycles щелчков по
+  // shortOnMs (расхаживаем ход). Помпа не запускается: режим всегда сухой.
+  void runWakeupFormula(int id, int longCycles, int longOnMs, int shortCycles,
+                        int shortOnMs, WakeupRun& run, AwLogging& logger) {
+    for (int i = 0; i < longCycles; i++) {
+      wakeupCycle(id, longOnMs, run, logger);
+    }
+    for (int i = 0; i < shortCycles; i++) {
+      wakeupCycle(id, shortOnMs, run, logger);
+    }
+  }
+
+  // Отчёт о прогоне. Про механику клапана ток не говорит ничего: соленоид
+  // тянет постоянный ток всё время, пока на него подано напряжение, хоть
+  // с прикипевшим штоком (tasks/2026-05-24: профиль плоский, inrush'а нет).
+  // Поэтому вердикт — про электрику, «ожил или нет» человек решает по звуку
+  // и по тому, пошла ли вода.
+  String buildWakeupReport(int id, const WakeupRun& run) {
+    const char* status =
+        run.lastDelta > CurrentSensor::VALVE_DELTA_THRESHOLD_MA
+            ? "COIL OK"
+            : "NO CURRENT";
+    char buf[96];
+    snprintf_P(buf, sizeof(buf),
+               PSTR("Wakeup plant %d: %u cycles, coil %dmA -> %dmA (%s)"), id,
+               run.cycles, run.firstDelta, run.lastDelta, status);
+    return String(buf);
   }
 
   // Проверяет подключён ли клапан id через дельту тока на ACS712.

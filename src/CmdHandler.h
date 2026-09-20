@@ -29,6 +29,7 @@ constexpr const char* kCmdConfig = "esp_plant_conf";
 constexpr const char* kCmdDaily = "esp_daily";
 constexpr const char* kCmdCheckValves = "esp_check_valves";
 constexpr const char* kCmdSwitchPump = "esp_pump";
+constexpr const char* kCmdWakeup = "esp_wakeup";
 
 enum class Action {
   kWater,        // форвард в UART: serialPlantCommand(ESP_COMMAND_WATER_PLANT, ...)
@@ -36,6 +37,7 @@ enum class Action {
   kDaily,        // форвард в UART без id/amount
   kCheckValves,  // форвард в UART без id/amount
   kSwitchPump,   // форвард в UART без id/amount: переключить активную помпу
+  kWakeup,       // форвард в UART: оживление клапана, id + формула прогона
   kReject,       // отказ на уровне JSON/имени команды, текст — в reason
 };
 
@@ -45,6 +47,12 @@ struct Decision {
   // отдельно, см. isPlantCommandInBounds ниже); -1, если поле отсутствует
   long plantId = -1;
   long amountMl = -1;
+  // для kWakeup — формула прогона оживления, границы тоже НЕ проверены
+  // (см. isWakeupCommandInBounds); -1, если поле отсутствует
+  long longCycles = -1;
+  long longOnMs = -1;
+  long shortCycles = -1;
+  long shortOnMs = -1;
   // человекочитаемый текст отказа (для aw/event type=reject и лога),
   // заполнен только при action == kReject
   char reason[96] = "";
@@ -90,6 +98,15 @@ inline Decision decideCmd(const char* payload, size_t length) {
     d.action = Action::kSwitchPump;
     return d;
   }
+  if (strcmp(command, kCmdWakeup) == 0) {
+    d.action = Action::kWakeup;
+    d.plantId = doc["plantId"] | -1L;
+    d.longCycles = doc["longCycles"] | -1L;
+    d.longOnMs = doc["longOnMs"] | -1L;
+    d.shortCycles = doc["shortCycles"] | -1L;
+    d.shortOnMs = doc["shortOnMs"] | -1L;
+    return d;
+  }
 
   // esp_graphs больше не существует (issue #20: графики строит Grafana из
   // aw/state) — упадёт сюда как неизвестная команда
@@ -105,6 +122,20 @@ inline bool isPlantCommandInBounds(long id, long amountMl, int plantsAmount,
                                    int maxWaterAmountMl) {
   return id >= 0 && id < plantsAmount && amountMl >= 0 &&
          amountMl <= maxWaterAmountMl;
+}
+
+// Чистая версия проверки границ оживления. Дефолты формулы сюда не приезжают:
+// aw-server всегда шлёт все четыре числа (свои дефолты он подставляет сам),
+// а с кнопки прошивка берёт WAKEUP_* из src/State.h — этот модуль ни те, ни
+// другие не хардкодит. maxCycles/maxOnMs — MAX_WAKEUP_CYCLES/MAX_WAKEUP_ON_MS.
+inline bool isWakeupCommandInBounds(long id, long longCycles, long longOnMs,
+                                    long shortCycles, long shortOnMs,
+                                    int plantsAmount, int maxCycles,
+                                    int maxOnMs) {
+  return id >= 0 && id < plantsAmount && longCycles >= 0 &&
+         longCycles <= maxCycles && shortCycles >= 0 &&
+         shortCycles <= maxCycles && longOnMs >= 0 && longOnMs <= maxOnMs &&
+         shortOnMs >= 0 && shortOnMs <= maxOnMs;
 }
 
 }  // namespace cmdhandler

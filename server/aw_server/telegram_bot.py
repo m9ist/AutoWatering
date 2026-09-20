@@ -43,6 +43,9 @@ def register_handlers(application: Application, router: Router, cmd_port: MqttCm
     async def pump(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _apply(update, router.handle_pump(_chat_id(update), _now()), cmd_port)
 
+    async def wakeup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        await _apply(update, router.handle_wakeup(_chat_id(update), context.args, _now()), cmd_port)
+
     async def state(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _apply(update, router.handle_state(_chat_id(update), _now()), cmd_port)
 
@@ -54,6 +57,7 @@ def register_handlers(application: Application, router: Router, cmd_port: MqttCm
     application.add_handler(CommandHandler("daily", daily))
     application.add_handler(CommandHandler("checkvalves", checkvalves))
     application.add_handler(CommandHandler("pump", pump))
+    application.add_handler(CommandHandler("wakeup", wakeup))
     application.add_handler(CommandHandler("state", state))
     application.add_handler(CommandHandler("help", help_cmd))
 

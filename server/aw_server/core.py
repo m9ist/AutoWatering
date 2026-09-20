@@ -34,9 +34,20 @@ CMD_CONFIG = "esp_plant_conf"
 CMD_DAILY = "esp_daily"
 CMD_CHECK_VALVES = "esp_check_valves"
 CMD_SWITCH_PUMP = "esp_pump"
+CMD_WAKEUP = "esp_wakeup"
 
 PLANTS_AMOUNT = 16
 MAX_WATER_AMOUNT_ML = 200
+# Формула оживления клапана и её границы — дубль WAKEUP_*/MAX_WAKEUP_* из
+# src/State.h (то же соглашение, что с CMD_*: контракт дублируется, не
+# импортируется). Дефолты подставляет сервер — до прошивки всегда доезжают
+# все четыре числа.
+WAKEUP_LONG_CYCLES = 3
+WAKEUP_LONG_ON_MS = 2000
+WAKEUP_SHORT_CYCLES = 7
+WAKEUP_SHORT_ON_MS = 300
+MAX_WAKEUP_CYCLES = 30
+MAX_WAKEUP_ON_MS = 5000
 _MAX_NUMBER_DIGITS = 6  # защита от переполнения int при парсинге (см. CommandParser.h)
 
 
@@ -111,9 +122,14 @@ ONLINE_SERVICE = "esp-online"
 _HELP_TEXT = (
     "/water plantX Yml — полить растение X объёмом Y мл (пример: /water plant3 50ml)\n"
     "/config plantX Yml — задать дневную норму растения X (пример: /config plant2 20ml)\n"
-    "/daily — дневной полив всех растений по нормам\n"
-    "/checkvalves — проверить, что клапаны физически подключены\n"
+    "/daily — дневной полив включённых тумблером растений, у которых задана норма\n"
+    "/checkvalves — проверить, что клапаны включённых растений физически подключены\n"
     "/pump — переключить активную помпу на другую (результат — в /state)\n"
+    "/wakeup plantX — расходить залипший клапан X: клапан щёлкает всухую, помпа "
+    f"не включается (по умолчанию {WAKEUP_LONG_CYCLES}x{WAKEUP_LONG_ON_MS}ms + "
+    f"{WAKEUP_SHORT_CYCLES}x{WAKEUP_SHORT_ON_MS}ms)\n"
+    "/wakeup plantX AxBms CxDms — то же со своей формулой "
+    "(пример: /wakeup plant3 5x1500 10x400)\n"
     "/state — последний известный стейт системы (из retained aw/state)\n"
     "/help — это сообщение\n"
     "Графики влажности/климата — в Grafana (дашборд «Автополив»)"
@@ -327,6 +343,57 @@ class Router:
         """
         return self._simple_command(chat_id, CMD_SWITCH_PUMP, "Команда отправлена.", now)
 
+    def handle_wakeup(self, chat_id: str, args: list[str], now: datetime) -> CommandResult:
+        """Оживление залипшего клапана: щелчки всухую, помпа не запускается.
+
+        Статус растения не проверяем — команда адресная, а дольше всех
+        простаивает как раз клапан выключенного тумблером горшка.
+        """
+        if not self.is_allowed(chat_id):
+            return CommandResult(reply_text=None, ignored=True)
+
+        parsed = _parse_wakeup_command(args)
+        if parsed is None:
+            return CommandResult(
+                reply_text=(
+                    "Неверный формат команды. Примеры: /wakeup plant3 "
+                    "или /wakeup plant3 5x1500 10x400"
+                )
+            )
+
+        plant_id, long_cycles, long_on_ms, short_cycles, short_on_ms = parsed
+        if not (
+            0 <= plant_id < PLANTS_AMOUNT
+            and 0 <= long_cycles <= MAX_WAKEUP_CYCLES
+            and 0 <= short_cycles <= MAX_WAKEUP_CYCLES
+            and 0 <= long_on_ms <= MAX_WAKEUP_ON_MS
+            and 0 <= short_on_ms <= MAX_WAKEUP_ON_MS
+        ):
+            return CommandResult(
+                reply_text=(
+                    f"Отказ: id растения 0..{PLANTS_AMOUNT - 1}, "
+                    f"циклов 0..{MAX_WAKEUP_CYCLES}, "
+                    f"длительность 0..{MAX_WAKEUP_ON_MS}мс"
+                )
+            )
+
+        payload = {
+            COMMAND_KEY: CMD_WAKEUP,
+            "timestamp": _timestamp(now),
+            "plantId": plant_id,
+            "longCycles": long_cycles,
+            "longOnMs": long_on_ms,
+            "shortCycles": short_cycles,
+            "shortOnMs": short_on_ms,
+        }
+        return CommandResult(
+            reply_text=self._ack_text(
+                f"Команда отправлена: оживление plant{plant_id}, "
+                f"{long_cycles}x{long_on_ms}ms + {short_cycles}x{short_on_ms}ms"
+            ),
+            cmd_payload=payload,
+        )
+
     def handle_state(self, chat_id: str, now: datetime) -> CommandResult:
         if not self.is_allowed(chat_id):
             return CommandResult(reply_text=None, ignored=True)
@@ -468,6 +535,54 @@ def _parse_plant_amount_command(message: str, prefix: str) -> tuple[int, int] | 
         return None
 
     return int(plant_id_str), int(amount_str)
+
+
+def _parse_wakeup_phase(token: str) -> tuple[int, int] | None:
+    """Разбирает фазу формулы "NxM" или "NxMms" -> (циклы, мс)."""
+    if token.endswith("ms"):
+        token = token[: -len("ms")]
+    cycles_str, sep, ms_str = token.partition("x")
+    if not sep:
+        return None
+    if not (_is_valid_integer(cycles_str) and _is_valid_integer(ms_str)):
+        return None
+    if len(cycles_str) > _MAX_NUMBER_DIGITS or len(ms_str) > _MAX_NUMBER_DIGITS:
+        return None
+    return int(cycles_str), int(ms_str)
+
+
+def _parse_wakeup_command(args: list[str]) -> tuple[int, int, int, int, int] | None:
+    """Разбирает аргументы "/wakeup plantX [AxBms CxDms]".
+
+    Фазы задаются либо обе, либо ни одной: с одной фазой человек не понял бы,
+    какая половина формулы осталась дефолтной. Только формат; границы значений
+    проверяет вызывающая сторона (см. handle_wakeup).
+    """
+    if not args or len(args) == 2 or len(args) > 3:
+        return None
+
+    plant_id_str = args[0]
+    if not plant_id_str.startswith("plant"):
+        return None
+    plant_id_str = plant_id_str[len("plant"):]
+    if not _is_valid_integer(plant_id_str) or len(plant_id_str) > _MAX_NUMBER_DIGITS:
+        return None
+    plant_id = int(plant_id_str)
+
+    if len(args) == 1:
+        return (
+            plant_id,
+            WAKEUP_LONG_CYCLES,
+            WAKEUP_LONG_ON_MS,
+            WAKEUP_SHORT_CYCLES,
+            WAKEUP_SHORT_ON_MS,
+        )
+
+    long_phase = _parse_wakeup_phase(args[1])
+    short_phase = _parse_wakeup_phase(args[2])
+    if long_phase is None or short_phase is None:
+        return None
+    return plant_id, long_phase[0], long_phase[1], short_phase[0], short_phase[1]
 
 
 def _timestamp(now: datetime) -> str:

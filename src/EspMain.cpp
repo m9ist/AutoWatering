@@ -114,6 +114,26 @@ void serialPlantCommand(const String& command, int id, int amount) {
   comm.communicationSendMessage(sendJson);
 }
 
+// Отправка в ардуино команды оживления клапана (esp_wakeup): id плюс формула
+// прогона. Дефолты формулы подставляет aw-server — сюда всегда приезжают все
+// четыре числа.
+void serialWakeupCommand(int id, int longCycles, int longOnMs, int shortCycles,
+                         int shortOnMs) {
+  JsonDocument json;
+  json[COMMAND_KEY] = ESP_COMMAND_WAKEUP;
+  json[F("timestamp")] = getTimestamp();
+  json[F("plantId")] = id;
+  json[F("longCycles")] = longCycles;
+  json[F("longOnMs")] = longOnMs;
+  json[F("shortCycles")] = shortCycles;
+  json[F("shortOnMs")] = shortOnMs;
+
+  String sendJson;
+  serializeJson(json, sendJson);
+  logger.println(sendJson);
+  comm.communicationSendMessage(sendJson);
+}
+
 void serialTimeSynced() {
   JsonDocument json;
   json[COMMAND_KEY] = ESP_COMMAND_TIME_SYNCED;
@@ -148,6 +168,27 @@ bool checkPlantCommandBounds(int id, int amount) {
     return true;
   }
   serialLog(plantCommandRejectReason());
+  return false;
+}
+
+String wakeupCommandRejectReason() {
+  return (String)F("Rejected: plant id must be 0..") + (PLANTS_AMOUNT - 1) +
+         F(", cycles 0..") + MAX_WAKEUP_CYCLES + F(", on 0..") +
+         MAX_WAKEUP_ON_MS + F("ms");
+}
+
+// Границы параметров оживления — та же схема, что у checkPlantCommandBounds:
+// арифметика в CmdHandler.h (тестируется native), здесь Arduino-обёртка с
+// логом отказа.
+bool checkWakeupCommandBounds(int id, int longCycles, int longOnMs,
+                              int shortCycles, int shortOnMs) {
+  if (cmdhandler::isWakeupCommandInBounds(id, longCycles, longOnMs, shortCycles,
+                                          shortOnMs, PLANTS_AMOUNT,
+                                          MAX_WAKEUP_CYCLES,
+                                          MAX_WAKEUP_ON_MS)) {
+    return true;
+  }
+  serialLog(wakeupCommandRejectReason());
   return false;
 }
 
@@ -239,6 +280,15 @@ void handleCmdMessage(const uint8_t* payload, unsigned int length) {
       return;
     case cmdhandler::Action::kSwitchPump:
       serialLog(ESP_COMMAND_SWITCH_PUMP, F("From aw/cmd"));
+      return;
+    case cmdhandler::Action::kWakeup:
+      if (!checkWakeupCommandBounds(d.plantId, d.longCycles, d.longOnMs,
+                                    d.shortCycles, d.shortOnMs)) {
+        publishEvent("reject", wakeupCommandRejectReason());
+        return;
+      }
+      serialWakeupCommand(d.plantId, d.longCycles, d.longOnMs, d.shortCycles,
+                          d.shortOnMs);
       return;
     case cmdhandler::Action::kReject:
     default:

@@ -7,11 +7,15 @@
 // см. комментарий в CmdHandler.h, почему модуль не тянет реальный State.h.
 static const int kPlantsAmount = 16;
 static const int kMaxWaterAmountMl = 200;
+// MAX_WAKEUP_CYCLES/MAX_WAKEUP_ON_MS как в src/State.h
+static const int kMaxWakeupCycles = 30;
+static const int kMaxWakeupOnMs = 5000;
 
 using cmdhandler::Action;
 using cmdhandler::decideCmd;
 using cmdhandler::Decision;
 using cmdhandler::isPlantCommandInBounds;
+using cmdhandler::isWakeupCommandInBounds;
 
 static Decision decide(const char* json) {
   return decideCmd(json, strlen(json));
@@ -25,6 +29,11 @@ static bool isRejectedEndToEnd(const char* json) {
   if (d.action == Action::kWater || d.action == Action::kConfig) {
     return !isPlantCommandInBounds(d.plantId, d.amountMl, kPlantsAmount,
                                    kMaxWaterAmountMl);
+  }
+  if (d.action == Action::kWakeup) {
+    return !isWakeupCommandInBounds(d.plantId, d.longCycles, d.longOnMs,
+                                    d.shortCycles, d.shortOnMs, kPlantsAmount,
+                                    kMaxWakeupCycles, kMaxWakeupOnMs);
   }
   return false;
 }
@@ -140,6 +149,54 @@ void test_missing_command_key_rejected() {
   TEST_ASSERT_EQUAL(static_cast<int>(Action::kReject), static_cast<int>(d.action));
 }
 
+// --- оживление клапана (esp_wakeup) ---
+
+void test_valid_wakeup_command() {
+  Decision d = decide("{\"c\":\"esp_wakeup\",\"plantId\":3,\"longCycles\":3,\"longOnMs\":2000,\"shortCycles\":7,\"shortOnMs\":300}");
+  TEST_ASSERT_EQUAL(static_cast<int>(Action::kWakeup), static_cast<int>(d.action));
+  TEST_ASSERT_EQUAL(3, d.plantId);
+  TEST_ASSERT_EQUAL(3, d.longCycles);
+  TEST_ASSERT_EQUAL(2000, d.longOnMs);
+  TEST_ASSERT_EQUAL(7, d.shortCycles);
+  TEST_ASSERT_EQUAL(300, d.shortOnMs);
+  TEST_ASSERT_TRUE(isWakeupCommandInBounds(d.plantId, d.longCycles, d.longOnMs,
+                                           d.shortCycles, d.shortOnMs,
+                                           kPlantsAmount, kMaxWakeupCycles,
+                                           kMaxWakeupOnMs));
+}
+
+// Поля отсутствуют -> -1 -> отказ на границах, а не молчаливый прогон
+// с мусорной формулой.
+void test_wakeup_command_missing_fields_rejected_end_to_end() {
+  TEST_ASSERT_TRUE(isRejectedEndToEnd("{\"c\":\"esp_wakeup\"}"));
+  TEST_ASSERT_TRUE(isRejectedEndToEnd(
+      "{\"c\":\"esp_wakeup\",\"plantId\":3}"));
+}
+
+void test_wakeup_bounds_accept_edge_values() {
+  TEST_ASSERT_TRUE(isWakeupCommandInBounds(0, 0, 0, 0, 0, kPlantsAmount,
+                                           kMaxWakeupCycles, kMaxWakeupOnMs));
+  TEST_ASSERT_TRUE(isWakeupCommandInBounds(15, 30, 5000, 30, 5000,
+                                           kPlantsAmount, kMaxWakeupCycles,
+                                           kMaxWakeupOnMs));
+}
+
+void test_wakeup_bounds_reject_out_of_range() {
+  // id вне массива растений
+  TEST_ASSERT_FALSE(isWakeupCommandInBounds(16, 3, 2000, 7, 300, kPlantsAmount,
+                                            kMaxWakeupCycles, kMaxWakeupOnMs));
+  // опечатка в числе циклов
+  TEST_ASSERT_FALSE(isWakeupCommandInBounds(0, 31, 2000, 7, 300, kPlantsAmount,
+                                            kMaxWakeupCycles, kMaxWakeupOnMs));
+  // опечатка в длительности: 3x20000 держал бы клапан 20 секунд подряд
+  TEST_ASSERT_FALSE(isWakeupCommandInBounds(0, 3, 20000, 7, 300, kPlantsAmount,
+                                            kMaxWakeupCycles, kMaxWakeupOnMs));
+  TEST_ASSERT_FALSE(isWakeupCommandInBounds(0, 3, 2000, 7, 9000, kPlantsAmount,
+                                            kMaxWakeupCycles, kMaxWakeupOnMs));
+  TEST_ASSERT_FALSE(isWakeupCommandInBounds(-1, -1, -1, -1, -1, kPlantsAmount,
+                                            kMaxWakeupCycles, kMaxWakeupOnMs));
+}
+
 int main() {
   UNITY_BEGIN();
 
@@ -149,6 +206,7 @@ int main() {
   RUN_TEST(test_daily_command_recognized);
   RUN_TEST(test_check_valves_command_recognized);
   RUN_TEST(test_switch_pump_command_recognized);
+  RUN_TEST(test_valid_wakeup_command);
   RUN_TEST(test_graphs_command_is_rejected);
 
   RUN_TEST(test_bounds_accepts_edge_values);
@@ -158,6 +216,9 @@ int main() {
   RUN_TEST(test_plant99_rejected_end_to_end);
   RUN_TEST(test_amount_over_limit_rejected_end_to_end);
   RUN_TEST(test_water_command_missing_fields_rejected_end_to_end);
+  RUN_TEST(test_wakeup_command_missing_fields_rejected_end_to_end);
+  RUN_TEST(test_wakeup_bounds_accept_edge_values);
+  RUN_TEST(test_wakeup_bounds_reject_out_of_range);
 
   RUN_TEST(test_malformed_json_rejected);
   RUN_TEST(test_empty_payload_rejected);
