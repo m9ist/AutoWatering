@@ -28,6 +28,20 @@
 // помпу — чтобы знать, жива ли она, до того как умрёт активная.
 #define SPARE_PROBE_PERCENT 10
 
+// Практический расход помпы, мл/с: по нему объём, заданный человеком в
+// миллилитрах, превращается в длительность пролива, и наоборот — в отчёте
+// о поливе из фактической длительности считается Expected ml.
+//
+// Число калибруется вручную: подставить мерный стакан, подержать кнопку
+// проливки, взять из отчёта Duration и поделить налитый объём на него
+// (мл / (мс / 1000)). Процедура — в readme, раздел «Калибровка расхода
+// воды». Значение зависит от помпы, её скорости и высоты подъёма шланга,
+// поэтому после любой переделки гидравлики его надо мерить заново.
+//
+// Измерено на активной помпе; резервная считается такой же — отдельно её
+// расход не проверяли.
+#define POMP_FLOW_ML_PER_SEC 7.7
+
 #define WATER_FLOW_ITERATION_MS 100
 
 // Оркестратор полива: насос, кнопки/тумблеры через мультиплексеры и
@@ -51,6 +65,11 @@ class Pomp {
   int plantsToButton[PLANTS_AMOUNT] = {1, 3, 5, 7, 8, 10, 12, 14,
                                        0, 2, 4, 6, 9, 11, 13, 15};
   unsigned long timeCheck;
+  // Окно, в котором помпа реально качала: от подачи напряжения на мотор до
+  // его снятия, без delay(200) на клапаны с обеих сторон. Именно по нему
+  // считается Expected ml — общая длительность полива завышала бы его
+  // примерно на 3 мл (0.4 с простоя на 7.7 мл/с).
+  unsigned long pumpRunMs = 0;
 
   int currentPomp;
   bool acsPrimed = false;
@@ -215,6 +234,7 @@ class Pomp {
     valves.turnOn(id, logger);
     // сделано, чтобы не создавать напряжение на клапанах
     delay(200);
+    pumpRunMs = millis();
     startPomp(pumpIdx, logger);
   }
 
@@ -246,6 +266,9 @@ class Pomp {
   // на стороне вызывающего кода через buildWaterReport().
   unsigned long stopWaterPlant(int id, AwLogging& logger) {
     stopPomp(logger);
+    // Отсечка окна помпы до delay(200): плавный сброс оборотов внутри
+    // stopPomp ещё качает, а закрытие клапана после паузы — уже нет.
+    pumpRunMs = millis() - pumpRunMs;
     // todo придумать более корректную схему <<<<<<<
     // сделано, чтобы не создавать напряжение на клапанах
     delay(200);
@@ -287,19 +310,31 @@ class Pomp {
         ampDelta > CurrentSensor::VALVE_DELTA_THRESHOLD_MA ? "OK"
                                                            : "DISCONNECTED";
     const char* probeMark = spareProbe ? " (spare probe)" : "";
-    char buf[160];
+    // Expected ml считаем из фактического окна работы помпы (pumpRunMs), а не
+    // из плана и не из общей длительности: пара «сколько должно было налиться
+    // за реально отработанное время» против «сколько намерил расходомер» —
+    // это и есть материал для калибровки POMP_FLOW_ML_PER_SEC. У ручной
+    // кнопки плана нет вовсе, а Duration с обеих сторон включает паузы на
+    // клапаны, когда помпа стоит.
+    // dtostrf, а не %f: avr-libc собран без float в printf.
+    char expectedStr[10];
+    char realStr[10];
+    dtostrf(pumpRunMs * POMP_FLOW_ML_PER_SEC / 1000.0, 0, 1, expectedStr);
+    dtostrf(realMl, 0, 1, realStr);
+    char buf[200];
     if (requestedMl >= 0) {
       snprintf_P(buf, sizeof(buf),
                  PSTR("Done water id %d with %dml. Pump %d%s. Amperage delta: "
-                      "%dmA (%s). Duration %lums. Real ml = %d"),
+                      "%dmA (%s). Duration %lums. Expected ml = %s. "
+                      "Real ml = %s"),
                  id, requestedMl, pumpIdx + 1, probeMark, ampDelta, valveStatus,
-                 actualMs, (int)realMl);
+                 actualMs, expectedStr, realStr);
     } else {
       snprintf_P(buf, sizeof(buf),
                  PSTR("Done water id %d. Pump %d%s. Amperage delta: %dmA (%s). "
-                      "Duration %lums. Real ml = %d"),
+                      "Duration %lums. Expected ml = %s. Real ml = %s"),
                  id, pumpIdx + 1, probeMark, ampDelta, valveStatus, actualMs,
-                 (int)realMl);
+                 expectedStr, realStr);
     }
     return String(buf);
   }
@@ -307,10 +342,9 @@ class Pomp {
   String waterPlant(int id, int amounMl, State& state, uint32_t nowEpoch,
                     AwLogging& logger) {
     wdt_reset();
-    float practicalSpeedMlInMs = 0.0077;
     // сколько итераций по 0.1 сек нужно сделать
-    int expectedNumIterations =
-        (float)amounMl / practicalSpeedMlInMs / WATER_FLOW_ITERATION_MS;
+    int expectedNumIterations = (float)amounMl * 1000.0 /
+                                POMP_FLOW_ML_PER_SEC / WATER_FLOW_ITERATION_MS;
     logger.writeln((String)F("Num iterations = ") + expectedNumIterations);
 
     uint8_t pumpIdx = pickPumpForWatering(state, logger);
