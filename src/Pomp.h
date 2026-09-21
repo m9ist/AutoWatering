@@ -30,17 +30,19 @@
 
 // Практический расход помпы, мл/с: по нему объём, заданный человеком в
 // миллилитрах, превращается в длительность пролива, и наоборот — в отчёте
-// о поливе из фактической длительности считается Expected ml.
+// о поливе из окна работы помпы считается Expected ml.
 //
-// Число калибруется вручную: подставить мерный стакан, подержать кнопку
-// проливки, взять из отчёта Duration и поделить налитый объём на него
-// (мл / (мс / 1000)). Процедура — в readme, раздел «Калибровка расхода
-// воды». Значение зависит от помпы, её скорости и высоты подъёма шланга,
-// поэтому после любой переделки гидравлики его надо мерить заново.
+// У каждой помпы он свой — померено, разница почти в полтора раза, поэтому
+// константы две, и брать их надо через pumpFlowMlPerSec(pumpIdx), а не
+// напрямую: полив может уйти на резерв пробой (SPARE_PROBE_PERCENT).
 //
-// Измерено на активной помпе; резервная считается такой же — отдельно её
-// расход не проверяли.
-#define POMP_FLOW_ML_PER_SEC 7.7
+// Числа калибруются вручную: подставить мерный стакан, подержать кнопку
+// проливки, сравнить налитое с Expected ml из отчёта. Процедура — в readme,
+// раздел «Калибровка расхода воды». Значение зависит от помпы, её скорости и
+// высоты подъёма шланга, поэтому после любой переделки гидравлики его надо
+// мерить заново.
+#define POMP_FLOW_ML_PER_SEC_1 2.1
+#define POMP_FLOW_ML_PER_SEC_2 3.2
 
 #define WATER_FLOW_ITERATION_MS 100
 
@@ -109,6 +111,13 @@ class Pomp {
     analogWrite(currentPomp, POMP_SPEED_LOW);
     delay(50);
     digitalWrite(currentPomp, LOW);
+  }
+
+  // Расход помпы, мл/с. Помпы физически разные, поэтому коэффициент выбирает
+  // не вызывающий код, а этот метод — по тому же позиционному номеру, каким
+  // помпа известна снаружи.
+  float pumpFlowMlPerSec(uint8_t pumpIdx) {
+    return pumpIdx == PUMP_1 ? POMP_FLOW_ML_PER_SEC_1 : POMP_FLOW_ML_PER_SEC_2;
   }
 
   // Позиционный номер помпы -> пин. Наружу (Telegram, aw/state) помпы
@@ -319,7 +328,8 @@ class Pomp {
     // dtostrf, а не %f: avr-libc собран без float в printf.
     char expectedStr[10];
     char realStr[10];
-    dtostrf(pumpRunMs * POMP_FLOW_ML_PER_SEC / 1000.0, 0, 1, expectedStr);
+    dtostrf(pumpRunMs * pumpFlowMlPerSec(pumpIdx) / 1000.0, 0, 1,
+            expectedStr);
     dtostrf(realMl, 0, 1, realStr);
     char buf[200];
     if (requestedMl >= 0) {
@@ -342,13 +352,16 @@ class Pomp {
   String waterPlant(int id, int amounMl, State& state, uint32_t nowEpoch,
                     AwLogging& logger) {
     wdt_reset();
-    // сколько итераций по 0.1 сек нужно сделать
-    int expectedNumIterations = (float)amounMl * 1000.0 /
-                                POMP_FLOW_ML_PER_SEC / WATER_FLOW_ITERATION_MS;
-    logger.writeln((String)F("Num iterations = ") + expectedNumIterations);
-
+    // Помпу выбираем до расчёта длительности: у резервной свой расход, и на
+    // пробе резерва (SPARE_PROBE_PERCENT) плана активной помпы не хватит.
     uint8_t pumpIdx = pickPumpForWatering(state, logger);
     bool spareProbe = pumpIdx != state.activePump;
+
+    // сколько итераций по 0.1 сек нужно сделать
+    int expectedNumIterations = (float)amounMl * 1000.0 /
+                                pumpFlowMlPerSec(pumpIdx) /
+                                WATER_FLOW_ITERATION_MS;
+    logger.writeln((String)F("Num iterations = ") + expectedNumIterations);
 
     beginWateringAmpStats(logger);
     beforeLoopFlowSensor();
