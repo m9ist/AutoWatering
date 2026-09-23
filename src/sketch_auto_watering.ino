@@ -145,9 +145,21 @@ void waterPlant(int id, int amount) {
   delay(10);
 }
 
+// Дневной полив держит loop() минутами, и без этого отчёты копились в очереди
+// и уходили в ESP пачкой в конце — на такой пачке связь срывалась и отчёты
+// терялись. Один тик отправляет не больше одного сообщения, а может уйти на
+// чтение входящего или на восстановление связи, поэтому тиков несколько.
+void flushCommunication() {
+  for (int i = 0; i < 3; i++) {
+    comm.communicationTick();
+    wdt_reset();
+  }
+}
+
 void runDailyCommand() {
   logger.buzzerCommand();
   sendTelegram(F("Start daily task."));
+  flushCommunication();
   for (int i = 0; i < PLANTS_AMOUNT; i++) {
     logFreeRam();
     const Plant& plant = global_state.plants[i];
@@ -155,6 +167,7 @@ void runDailyCommand() {
       continue;
     }
     waterPlant(i, plant.dailyAmountMl);
+    flushCommunication();
   }
   sendTelegram((String)F("Daily task is completed. Free mem = ") + freeRam());
 }

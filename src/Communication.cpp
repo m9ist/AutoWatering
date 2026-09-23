@@ -241,10 +241,11 @@ void Communication::communicationTick() {
       return;
     }
 
-    String message = queueWrite[queueWritePos];
-    queueWrite[queueWritePos] = F("");
-    queueWritePos = (queueWritePos + 1) % COMMUNICATION_OUT_MESSAGES_LENGTH;
-    queueWriteSize--;
+    // Сообщение остаётся в очереди, пока вторая сторона не подтвердит приём
+    // (COMMUNICATION_END): таймаут посреди отправки иначе терял его насовсем.
+    // Ссылка, а не копия — на 8КБ RAM второй экземпляр длинного кадра дорог.
+    // Очередь во время отправки никто не трогает: всё однопоточно.
+    const String& message = queueWrite[queueWritePos];
 
     unsigned int nextMessagePartStart = 0;
     while (nextMessagePartStart < message.length()) {
@@ -265,6 +266,9 @@ void Communication::communicationTick() {
     ret = readNextChunk();
     if (timeOut(ret)) return;
     if (ret == COMMUNICATION_END) {
+      queueWrite[queueWritePos] = F("");
+      queueWritePos = (queueWritePos + 1) % COMMUNICATION_OUT_MESSAGES_LENGTH;
+      queueWriteSize--;
       state = STATE_AWAIT;
     } else {
 #ifdef DEBUG_LOG
