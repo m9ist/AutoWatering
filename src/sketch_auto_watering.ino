@@ -120,16 +120,43 @@ void setup() {
 
 uint32_t test_time = 0;
 
+// Писатель для serializeJson, дописывающий в String без перевыделений: в
+// заранее выделенном буфере concat места хватает всегда. Сериализовать прямо
+// в String нельзя — ArduinoJson сначала обнуляет её через
+// str = (const char*)0, а на AVR это free() буфера, и reserve пропадал.
+struct ReservedStringWriter {
+  String& out;
+  size_t write(uint8_t c) { return out.concat((char)c) ? 1 : 0; }
+  size_t write(const uint8_t* s, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+      if (!write(s[i])) return i;
+    }
+    return n;
+  }
+};
+
+// Сериализует doc в out одним выделением памяти. false — памяти не хватило,
+// out пустая: такое сообщение не шлём, пустая строка ломала ESP.
+bool serializeJsonOnce(const JsonDocument& doc, String& out) {
+  if (!out.reserve(measureJson(doc))) return false;
+  ReservedStringWriter writer{out};
+  serializeJson(doc, writer);
+  return true;
+}
+
 void sendTelegram(String message) {
   JsonDocument toSend;
   toSend[COMMAND_KEY] = ARDUINO_SEND_TELEGRAM;
   toSend[F("message")] = (String)F("Arduino: ") + message;
   String out;
-  serializeJson(toSend, out);
+  if (!serializeJsonOnce(toSend, out)) {
+    logger.writeln(F("No memory for telegram message"));
+    return;
+  }
 #ifdef DEBUG_LOG
   logger.writeln(out);
 #endif
-  comm.communicationSendMessage(out);
+  comm.communicationSendMessage(static_cast<String&&>(out));
   logFreeRam();
 }
 
@@ -363,11 +390,16 @@ void loop() {
     logger.writeln((String)F("Expected string length ") +
                    (measureJson(toSend) + 1));
 #endif
-    serializeJson(toSend, out);
+    // Кадр при нехватке памяти пропускаем, следующее изменение стейта
+    // пришлёт свежий.
+    if (serializeJsonOnce(toSend, out)) {
 #ifdef DEBUG_LOG
-    logger.writeln(out);
+      logger.writeln(out);
 #endif
-    comm.communicationSendMessage(out);
+      comm.communicationSendMessage(static_cast<String&&>(out));
+    } else {
+      logger.writeln(F("No memory for state frame"));
+    }
     global_state.updated = false;
     // todo придумать более красивую схему обновления экрана
     loopScreen(global_state);

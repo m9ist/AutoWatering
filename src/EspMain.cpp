@@ -93,7 +93,12 @@ void serialLog(const String& command, const String& s) {
   Serial.println(sendJson);
 #else
   logger.println(sendJson);
-  comm.communicationSendMessage(sendJson);
+  // Логи ESP уходят только в MQTT: Mega их всё равно игнорирует, а лишняя
+  // отправка в UART, пока Mega минутами занята поливом, рвала связь (дневной
+  // полив 25.09). В UART — только команды.
+  if (command != String(ESP_COMMAND_LOG)) {
+    comm.communicationSendMessage(sendJson);
+  }
 #endif
 #endif
 }

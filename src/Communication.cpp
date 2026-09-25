@@ -14,6 +14,13 @@
 // \0 null \r \a \b \f \v
 // https://forum.arduino.cc/t/printing-special-characters/97446
 
+// Отдаёт буфер строки обратно в кучу. Присваивание F("") или String() этого
+// не делает: String::reserve(0) оставляет уже выделенный буфер, и слот
+// очереди навсегда держал память под самое длинное сообщение, что в нём
+// побывало (10 слотов — несколько КБ из 8КБ RAM Mega). Строка из nullptr
+// буфера не имеет, и move-присваивание освобождает старый.
+static void releaseString(String& s) { s = String((const char*)nullptr); }
+
 String Communication::readNextChunk() {
   int ctn = 0;
   String ret;
@@ -90,7 +97,7 @@ void Communication::readMessageAfterCommunicationStart() {
       queueReadSize++;
     }
     result.trim();
-    queueRead[pos] = result;
+    queueRead[pos] = static_cast<String&&>(result);
     state = STATE_AWAIT;
   }
 }
@@ -247,14 +254,17 @@ void Communication::communicationTick() {
     // Очередь во время отправки никто не трогает: всё однопоточно.
     const String& message = queueWrite[queueWritePos];
 
+    // Чанки пишем прямо из памяти сообщения: substring выделял бы по
+    // строке на каждый чанк.
     unsigned int nextMessagePartStart = 0;
     while (nextMessagePartStart < message.length()) {
-      String chunk = message.substring(
-          nextMessagePartStart,
-          min(message.length(),
-              nextMessagePartStart + COMMUNICATION_DATA_CHUNK_SIZE));
-      nextMessagePartStart += COMMUNICATION_DATA_CHUNK_SIZE;
-      printChunk(chunk);
+      unsigned int chunkLength =
+          min(message.length() - nextMessagePartStart,
+              (unsigned int)COMMUNICATION_DATA_CHUNK_SIZE);
+      serial.write((const uint8_t*)message.c_str() + nextMessagePartStart,
+                   chunkLength);
+      serial.print(COMMUNICATION_CHUNK_END);
+      nextMessagePartStart += chunkLength;
       ret = readNextChunk();
       if (timeOut(ret)) return;
       if (ret != COMMUNICATION_NEXT) {
@@ -266,7 +276,7 @@ void Communication::communicationTick() {
     ret = readNextChunk();
     if (timeOut(ret)) return;
     if (ret == COMMUNICATION_END) {
-      queueWrite[queueWritePos] = F("");
+      releaseString(queueWrite[queueWritePos]);
       queueWritePos = (queueWritePos + 1) % COMMUNICATION_OUT_MESSAGES_LENGTH;
       queueWriteSize--;
       state = STATE_AWAIT;
@@ -301,7 +311,9 @@ void Communication::communicationSendMessage(String message) {
     pos = (queueWritePos + queueWriteSize) % COMMUNICATION_OUT_MESSAGES_LENGTH;
     queueWriteSize++;
   }
-  queueWrite[pos] = message;
+  // move, а не копия: сообщение уже лежит в параметре, второй экземпляр
+  // длинного кадра на 8КБ RAM ни к чему. std::move на AVR нет (нет <utility>).
+  queueWrite[pos] = static_cast<String&&>(message);
   // log.println((String)F("Queue size ") + queueWriteSize + F(" pos=") + pos +
   // F(" writePos") + queueWritePos + F(" message ") +
   // queueWrite[pos]);
@@ -309,8 +321,8 @@ void Communication::communicationSendMessage(String message) {
 
 // выдаем сообщение из входящей очереди сообщений
 String Communication::communicationGetMessage() {
-  String message = queueRead[queueReadPos];
-  queueRead[queueReadPos] = F("");
+  // move забирает буфер из слота, слот остаётся без памяти
+  String message = static_cast<String&&>(queueRead[queueReadPos]);
   queueReadPos = (queueReadPos + 1) % COMMUNICATION_IN_MESSAGES_LENGTH;
   queueReadSize--;
   return message;
